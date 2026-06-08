@@ -161,7 +161,7 @@ jobs:
 
       - name: POST findings to Shuffle
         env:
-          SHUFFLE_WEBHOOK_URL: ${{ secrets.SHUFFLE_WEBHOOK_URL }}
+          SHUFFLE_WEBHOOK_URL: ${{ secrets.SHUFFLE_WEBHOOK_URL || '' }}
         run: |
           if [ -n "$SHUFFLE_WEBHOOK_URL" ]; then
             python3 soar/soar_connector.py
