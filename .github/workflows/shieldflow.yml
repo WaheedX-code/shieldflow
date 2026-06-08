@@ -160,7 +160,11 @@ jobs:
         run: pip install requests
 
       - name: POST findings to Shuffle
-        if: ${{ secrets.shuffle-webhook-url != '' }}
         env:
-          SHUFFLE_WEBHOOK_URL: ${{ secrets.shuffle-webhook-url }}
-        run: python3 soar/soar_connector.py
+          SHUFFLE_WEBHOOK_URL: ${{ secrets.SHUFFLE_WEBHOOK_URL }}
+        run: |
+          if [ -n "$SHUFFLE_WEBHOOK_URL" ]; then
+            python3 soar/soar_connector.py
+          else
+            echo "No SHUFFLE_WEBHOOK_URL set - skipping SOAR notification"
+          fi
