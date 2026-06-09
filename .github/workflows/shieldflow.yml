@@ -78,7 +78,7 @@ jobs:
             trivy-fs.json
             trivy-image.json
 
-  secrets-gitleaks:
+  gitleaks-scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -145,7 +145,7 @@ jobs:
     needs:
       - sast-semgrep
       - sca-trivy
-      - secrets-gitleaks
+      - gitleaks-scan
       - dast-zap
     if: always()
     steps:
