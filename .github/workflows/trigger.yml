@@ -1,0 +1,19 @@
+name: Trigger ShieldFlow Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target-url:
+        description: 'URL of the application to scan'
+        required: true
+        type: string
+
+jobs:
+  call-pipeline:
+    uses: ./.github/workflows/shieldflow.yml
+    with:
+      target-url: ${{ inputs.target-url || github.event.pull_request.head.repo.html_url }}
+    secrets:
+      shuffle-webhook-url: ${{ secrets.SHUFFLE_WEBHOOK_URL }}
