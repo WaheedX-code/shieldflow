@@ -1,6 +1,8 @@
 name: Trigger ShieldFlow Pipeline
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -9,11 +11,21 @@ on:
         description: 'URL of the application to scan'
         required: true
         type: string
+      target-image:
+        description: 'Docker image to scan (optional)'
+        required: false
+        type: string
+      target-port:
+        description: 'Port the app runs on (optional)'
+        required: false
+        type: string
 
 jobs:
   call-pipeline:
     uses: ./.github/workflows/shieldflow.yml
     with:
-      target-url: ${{ inputs.target-url || github.event.pull_request.head.repo.html_url }}
+      target-url: ${{ inputs.target-url || vars.TARGET_URL }}
+      target-image: ${{ inputs.target-image || vars.TARGET_IMAGE || '' }}
+      target-port: ${{ inputs.target-port || vars.TARGET_PORT || '' }}
     secrets:
       shuffle-webhook-url: ${{ secrets.SHUFFLE_WEBHOOK_URL }}
