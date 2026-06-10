@@ -127,12 +127,13 @@ jobs:
           fail_action: true
           cmd_options: '-a'
           format: sarif
+          output: zap.sarif
 
       - name: Upload ZAP Report
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: 'report_sarif.sarif'
+          sarif_file: 'zap.sarif'
 
       - name: Stop Docker target
         if: ${{ inputs.target-image != '' }}
