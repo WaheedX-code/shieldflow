@@ -38,7 +38,7 @@ jobs:
       - name: Run Semgrep
         run: |
           semgrep scan \
-            --config "p/owasp-top-ten" \
+            --config "p/default" \
             --config "p/javasript" \
             --sarif-output=semgrep.sarif \
             --error
