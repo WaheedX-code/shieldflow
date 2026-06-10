@@ -126,18 +126,16 @@ jobs:
           target: ${{ inputs.target-url }}
           fail_action: true
           cmd_options: '-a'
-          format: sarif
-          output: zap.sarif
-
-      - name: Find generated reports
-        if: always()
-        run: find . -type f
 
       - name: Upload ZAP Report
-        uses: github/codeql-action/upload-sarif@v4
+        uses: actions/upload-artifact@v4
         if: always()
         with:
-          sarif_file: 'zap.sarif'
+          name: zap-report
+          path: |
+            report_html.html
+            report_json.json
+            report_md.md
 
       - name: Stop Docker target
         if: ${{ inputs.target-image != '' }}
