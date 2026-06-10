@@ -20,6 +20,11 @@ on:
         required: false
         type: string
 
+permissions:
+  security-events: write
+  actions: read
+  contents: read
+
 jobs:
   call-pipeline:
     uses: ./.github/workflows/shieldflow.yml
