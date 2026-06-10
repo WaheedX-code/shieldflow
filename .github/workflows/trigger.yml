@@ -1,4 +1,4 @@
-?25?name: Trigger ShieldFlow Pipeline
+name: Trigger ShieldFlow Pipeline
 
 on:
   push:
