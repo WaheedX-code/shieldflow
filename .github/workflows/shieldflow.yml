@@ -31,6 +31,11 @@ jobs:
       - uses: returntocorp/semgrep-action@v1
         with:
           config: "p/owasp-top-ten p/javascript"
+          generateSarif: "1"
+      - uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: semgrep.sarif
+        if: always()
 
   sca-trivy:
     runs-on: ubuntu-latest
@@ -38,45 +43,59 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Install Trivy
-        run: |
-          sudo apt-get update
-          sudo apt-get install wget apt-transport-https gnupg lsb-release -y
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install trivy -y
+   #   - name: Install Trivy
+   #     run: |
+   #       sudo apt-get update
+   #       sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+   #       wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+   #       echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+   #       sudo apt-get update
+   #       sudo apt-get install trivy -y
 
       - name: Scan Repository Files
-        run: |
-          trivy fs \
-            --scanners vuln \
-            --severity HIGH,CRITICAL \
-            --exit-code 0 \
-            --format json \
-            -o trivy-fs.json \
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          format: 'sarif'
+          output: 'trivy-fs.sarif'
+          severity: 'HIGH,CRITICAL'
+#        run: |
+#          trivy fs \
+#            --scanners vuln \
+#            --severity HIGH,CRITICAL \
+#            --exit-code 0 \
+#            --format json \
+#            -o trivy-fs.json \
             .
 
       - name: Scan Docker Image
         if: ${{ inputs.target-image != '' }}
+        uses: aquasecurity/trivy-action@master
         env:
           TARGET_IMAGE: ${{ inputs.target-image }}
-        run: |
-          trivy image \
-            --exit-code 1 \
-            --severity HIGH,CRITICAL \
-            --format json \
-            -o trivy-image.json \
-            $TARGET_IMAGE
+        with:
+          scan-type: 'image'
+          image-ref: ${{ inputs.target-image }}
+          format: 'sarif'
+          output: 'trivy-image.sarif'
+          severity:' HIGH,CRITICAL'
+#        run: |
+#          trivy image \
+#            --exit-code 1 \
+#            --severity HIGH,CRITICAL \
+#            --format json \
+#            -o trivy-image.json \
+#            $TARGET_IMAGE
 
       - name: Upload Trivy Results
-        uses: actions/upload-artifact@v4
+        uses: github/codeql-action/upload-sarif@v2
         if: always()
         with:
-          name: trivy-results
-          path: |
-            trivy-fs.json
-            trivy-image.json
+          sarif_filr: '.'
+ #         name: trivy-results
+ #         path: |
+ #           trivy-fs.json
+ #           trivy-image.json
 
   gitleaks-scan:
     runs-on: ubuntu-latest
@@ -93,7 +112,10 @@ jobs:
           sudo mv gitleaks /usr/local/bin/
 
       - name: Run Gitleaks
-        run: gitleaks detect --source . --no-git --redact --exit-code 0
+            uses: gitleaks/gitleaks-action@v2
+            env:
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#        run: gitleaks detect --source . --no-git --redact --exit-code 0
 
   dast-zap:
     runs-on: ubuntu-latest
@@ -121,7 +143,7 @@ jobs:
           sleep 5
 
       - name: Run ZAP Full Scan
-        uses: zaproxy/action-full-scan@v0.9.0
+        uses: zaproxy/action-full-scan@v0.10.0
         with:
           target: ${{ inputs.target-url }}
           fail_action: true
