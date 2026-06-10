@@ -21,7 +21,8 @@ on:
       shuffle-webhook-url:
         description: 'Shuffle SOAR webhook URL for findings ingestion'
         required: false
-    permissions:
+
+permissions:
       security-events: write
       actions: read
       contents: read
