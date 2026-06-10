@@ -28,29 +28,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: returntocorp/semgrep-action@v1
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
         with:
           config: "p/owasp-top-ten p/javascript"
           generateSarif: "1"
-      - uses: github/codeql-action/upload-sarif@v2
-            if: always()
-            with:
-              sarif_file: semgrep.sarif
+      - name: Upload Semgrep SARIF
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
 
   sca-trivy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-
-   #   - name: Install Trivy
-   #     run: |
-   #       sudo apt-get update
-   #       sudo apt-get install wget apt-transport-https gnupg lsb-release -y
-   #       wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-   #       echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-   #       sudo apt-get update
-   #       sudo apt-get install trivy -y
 
       - name: Scan Repository Files
         uses: aquasecurity/trivy-action@master
@@ -59,14 +52,6 @@ jobs:
           format: 'sarif'
           output: 'trivy-fs.sarif'
           severity: 'HIGH,CRITICAL'
-#        run: |
-#          trivy fs \
-#            --scanners vuln \
-#            --severity HIGH,CRITICAL \
-#            --exit-code 0 \
-#            --format json \
-#            -o trivy-fs.json \
-#            .
 
       - name: Scan Docker Image
         if: ${{ inputs.target-image != '' }}
@@ -78,24 +63,13 @@ jobs:
           image-ref: ${{ inputs.target-image }}
           format: 'sarif'
           output: 'trivy-image.sarif'
-          severity:' HIGH,CRITICAL'
-#        run: |
-#          trivy image \
-#            --exit-code 1 \
-#            --severity HIGH,CRITICAL \
-#            --format json \
-#            -o trivy-image.json \
-#            $TARGET_IMAGE
+          severity: 'HIGH,CRITICAL'
 
       - name: Upload Trivy Results
         uses: github/codeql-action/upload-sarif@v2
         if: always()
         with:
-          sarif_filr: '.'
- #         name: trivy-results
- #         path: |
- #           trivy-fs.json
- #           trivy-image.json
+          sarif_file: '.'
 
   gitleaks-scan:
     runs-on: ubuntu-latest
@@ -104,18 +78,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Gitleaks
-        run: |
-          VERSION=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep tag_name | cut -d '"' -f4)
-          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/${VERSION}/gitleaks_${VERSION#v}_linux_x64.tar.gz" -o gitleaks.tar.gz
-          tar -xzf gitleaks.tar.gz
-          sudo mv gitleaks /usr/local/bin/
-
       - name: Run Gitleaks
-            uses: gitleaks/gitleaks-action@v2
-            env:
-              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#        run: gitleaks detect --source . --no-git --redact --exit-code 0
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   dast-zap:
     if: ${{ inputs.target-url != '' }}
@@ -152,13 +118,10 @@ jobs:
           format: sarif
 
       - name: Upload ZAP Report
-            uses: github/codeql-action/upload-sarif@v2
-  #      uses: actions/upload-artifact@v4
-            if: always()
-            with:
-              sarif-file: 'report_sarif.sarif'
-  #        name: zap-dast-results
-  #        path: report_html.html
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'report_sarif.sarif'
 
       - name: Stop Docker target
         if: ${{ inputs.target-image != '' }}
