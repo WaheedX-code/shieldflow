@@ -129,6 +129,10 @@ jobs:
           format: sarif
           output: zap.sarif
 
+      - name: Find generated reports
+        if: always()
+        run: find . -type f
+
       - name: Upload ZAP Report
         uses: github/codeql-action/upload-sarif@v4
         if: always()
