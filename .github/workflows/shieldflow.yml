@@ -118,6 +118,7 @@ jobs:
 #        run: gitleaks detect --source . --no-git --redact --exit-code 0
 
   dast-zap:
+    if: ${{ inputs.target-url != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -148,13 +149,16 @@ jobs:
           target: ${{ inputs.target-url }}
           fail_action: true
           cmd_options: '-a'
+          format: sarif
 
       - name: Upload ZAP Report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: zap-dast-results
-          path: report_html.html
+            uses: github/codeql-action/upload-sarif@v2
+  #      uses: actions/upload-artifact@v4
+            if: always()
+            with:
+              sarif-file: 'report_sarif.sarif'
+  #        name: zap-dast-results
+  #        path: report_html.html
 
       - name: Stop Docker target
         if: ${{ inputs.target-image != '' }}

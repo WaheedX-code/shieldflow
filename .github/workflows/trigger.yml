@@ -9,7 +9,7 @@ on:
     inputs:
       target-url:
         description: 'URL of the application to scan'
-        required: true
+        required: false
         type: string
       target-image:
         description: 'Docker image to scan (optional)'
