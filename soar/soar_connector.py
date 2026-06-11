@@ -1,10 +1,7 @@
 import json, requests, os, hashlib
 from datetime import datetime
 
-WEBHOOK_GITLEAKS = os.getenv("WEBHOOK_GITLEAKS", "http://10.180.251.70:3001/api/v1/hooks/webhook_63e0d4f2-3e52-45b4-b5bd-d3fd1fc7c9d8")
-WEBHOOK_TRIVY = os.getenv("WEBHOOK_TRIVY", "http://10.180.251.70:3001/api/v1/hooks/webhook_667913be-db76-4ba3-ae0c-d85e1cbadccb")
-WEBHOOK_ZAP = os.getenv("WEBHOOK_ZAP", "http://10.180.251.70:3001/api/v1/hooks/webhook_4c00a4d5-580a-4a1e-8561-3af61999be1f")
-WEBHOOK_SEMGREP = os.getenv("WEBHOOK_SEMGREP", "http://10.180.251.70:3001/api/v1/hooks/webhook_63e0d4f2-3e52-45b4-b5bd-d3fd1fc7c9d8")
+WEBHOOK_URL = os.getenv("SHUFFLE_WEBHOOK_URL", "")
 
 def enrich_with_nvd(cve_id):
     if not cve_id:
@@ -25,7 +22,7 @@ def enrich_with_nvd(cve_id):
     except Exception as e:
         print(f"[WARN] NVD lookup failed for {cve_id}: {e}")
         return {}
-        import hashlib
+
 FINGERPRINT_FILE = "/tmp/soar_seen.txt"
 
 def fingerprint(finding):
@@ -115,15 +112,7 @@ def post_to_soar(finding):
         enrichment = enrich_with_nvd(finding["cve_id"])
         finding.update(enrichment)
 
-    tool = finding.get("tool", "")
-    if tool == "trivy":
-        webhook = WEBHOOK_TRIVY
-    elif tool == "zap":
-        webhook = WEBHOOK_ZAP
-    elif tool == "gitleaks":
-        webhook = WEBHOOK_GITLEAKS
-    else:
-        webhook = WEBHOOK_SEMGREP
+    webhook = WEBHOOK_URL
 
     try:
         resp = requests.post(webhook, json=finding, timeout=10)
