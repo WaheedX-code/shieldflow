@@ -23,9 +23,9 @@ on:
         required: false
 
 permissions:
-      security-events: write
-      actions: read
-      contents: read
+  security-events: write
+  actions: read
+  contents: read
 
 jobs:
 
@@ -47,6 +47,13 @@ jobs:
         if: always()
         with:
           sarif_file: semgrep.sarif
+
+      - name: Upload Semgrep Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: semgrep-results
+          path: semgrep.sarif
 
   sca-trivy:
     runs-on: ubuntu-latest
@@ -80,6 +87,13 @@ jobs:
         with:
           sarif_file: '.'
 
+      - name: Upload Trivy Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-results
+          path: trivy-fs.sarif
+
   gitleaks-scan:
     runs-on: ubuntu-latest
     steps:
@@ -91,6 +105,13 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Gitleaks Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gitleaks-results
+          path: results.sarif
 
   dast-zap:
     if: ${{ inputs.target-url != '' }}
@@ -153,6 +174,34 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v3
+
+      - name: Download Semgrep SARIF
+        uses: actions/download-artifact@v4
+        with:
+          name: semgrep-results
+          path: reports/
+        continue-on-error: true
+
+      - name: Download ZAP Results
+        uses: actions/download-artifact@v4
+        with:
+          name: zap-report
+          path: reports/
+        continue-on-error: true
+
+      - name: Download Trivy Results
+        uses: actions/download-artifact@v4
+        with:
+          name: trivy-results
+          path: reports/
+        continue-on-error: true
+
+      - name: Download Gitleaks Results
+        uses: actions/download-artifact@v4
+        with:
+          name: gitleaks-results
+          path: reports/
+        continue-on-error: true
 
       - name: Set up Python
         uses: actions/setup-python@v4
