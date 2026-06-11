@@ -130,7 +130,7 @@ jobs:
 |--------------|--------|-------|-----------------------------------------------|
 |`target-url`  |No      |`''`   |URL of the running application to scan with ZAP|
 |`target-image`|No      |`''`   |Docker image to spin up and scan               |
-|`target-port` |No      |`3000` |Port the application runs on                   |
+|`target-port` |No      |`''`   |Port the application runs on                   |
 
 ### Secrets
 
