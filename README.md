@@ -259,6 +259,10 @@ If `SHUFFLE_WEBHOOK_URL` is not set, the SOAR notification step is silently skip
 
 -----
 
+## Contributors
+- [WaheedX-code] (https://github.com/WaheedX-code) - Pipeline architecture, SCA, DAST, break gates
+- [funke038] (https://github.com/funke038) - SOAR engineering, playbooks, CVE enrichment
+
 ##  Contributing
 
 Contributions are welcome! Here’s how to get started:
