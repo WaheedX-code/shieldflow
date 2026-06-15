@@ -118,6 +118,51 @@ jobs:
             robots.txt
             sitemap.xml
 
+  nuclei-scan:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.target-url != '' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Nuclei
+        run: |
+          wget -q https://github.com/projectdiscovery/nuclei/releases/latest/download/nuclei_linux_amd64.zip
+          unzip -q nuclei_linux_amd64.zip
+          sudo mv nuclei /usr/local/bin/
+          nuclei -version
+
+      - name: Update Nuclei Templates
+        run: nuclei -update-templates || true
+
+      - name: Run Nuclei Scan
+        env:
+          TARGET_URL: ${{ inputs.target-url }}
+        run: |
+          nuclei \
+            -u "$TARGET_URL" \
+            -severity critical,high,medium \
+            -o nuclei-results.txt \
+            -sarif-export nuclei.sarif \
+            -timeout 10 \
+            -silent || true
+          touch nuclei-results.txt
+          touch nuclei.sarif
+
+      - name: Upload Nuclei SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: nuclei.sarif
+        continue-on-error: true
+
+      - name: Upload Nuclei Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nuclei-results
+          path: |
+            nuclei-results.txt
+            nuclei.sarif
 
   sca-trivy:
     runs-on: ubuntu-latest
@@ -235,6 +280,7 @@ jobs:
       - sca-trivy
       - gitleaks-scan
       - recon
+      - nuclei-scan
       - dast-zap
     if: always()
     steps:
@@ -272,6 +318,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: recon-results
+          path: reports/
+        continue-on-error: true
+
+      - name: Download Nuclei Results
+        uses: actions/download-artifact@v4
+        with:
+          name: nuclei-results
           path: reports/
         continue-on-error: true
 
