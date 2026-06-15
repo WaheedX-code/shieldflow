@@ -100,11 +100,14 @@ jobs:
             "/.git"
           )
           for path in "${paths[@]}"; do
-            status=$(curl -s -o /dev/null -w "%{http_code}" "$TARGET_URL$path")
-            if [ "$status" != "404" ]; then
+            status=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 "$TARGET_URL$path" || echo "000")
+            if [ "$status" != "404" ] && [ "$status" != "000" ]; then
               echo "[FOUND] $TARGET_URL$path — Status: $status"
+            else
+              echo "[NOT FOUND] $path - Status: $status"
             fi
           done
+          exit 0
 
       - name: Upload Recon Results
         uses: actions/upload-artifact@v4
