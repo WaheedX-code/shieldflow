@@ -171,11 +171,15 @@ jobs:
             echo "Extracted domain: $domain"
 
         - name: Run Subfinder
-          uses: projectdiscovery/subfinder-action@v1.0.0
-          with:
-            domain: ${{ env.TARGET_DOMAIN }}
-            output: subdomains.txt
-          continue-on-error: true
+          env:
+            TARGET_DOMAIN: ${{ env.TARGET_DOMAIN }}
+          run: |
+            go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+            subfinder -d "$TARGET_DOMAIN" -o subdomains.txt -silent || true
+            touch subdomains.txt
+            echo "=== Discovered Subdomains ==="
+            cat subdomains.txt
+            echo "Total: $(wc -l < subdomains.txt) subdomains found"
 
         - name: Probe Live Subdomains
           run: |
