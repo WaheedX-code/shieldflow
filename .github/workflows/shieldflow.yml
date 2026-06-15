@@ -164,6 +164,63 @@ jobs:
             nuclei-results.txt
             nuclei.sarif
 
+    subdomain-discovery:
+    runs-on: ubuntu-latest
+    if: ${{ inputs.target-url != '' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Subfinder
+        run: |
+          wget -q https://github.com/projectdiscovery/subfinder/releases/latest/download/subfinder_linux_amd64.zip
+          unzip -q subfinder_linux_amd64.zip
+          sudo mv subfinder /usr/local/bin/
+          subfinder -version
+
+      - name: Extract Domain
+        env:
+          TARGET_URL: ${{ inputs.target-url }}
+        run: |
+          # Extract domain from URL
+          domain=$(echo "$TARGET_URL" | sed 's|https\?://||' | sed 's|/.*||')
+          echo "TARGET_DOMAIN=$domain" >> $GITHUB_ENV
+          echo "Extracted domain: $domain"
+
+      - name: Run Subfinder
+        env:
+          TARGET_DOMAIN: ${{ env.TARGET_DOMAIN }}
+        run: |
+          subfinder \
+            -d "$TARGET_DOMAIN" \
+            -o subdomains.txt \
+            -silent || true
+          touch subdomains.txt
+          echo "=== Discovered Subdomains ==="
+          cat subdomains.txt
+          echo "Total: $(wc -l < subdomains.txt) subdomains found"
+
+      - name: Probe Live Subdomains
+        run: |
+          if [ -s subdomains.txt ]; then
+            echo "=== Probing live subdomains ==="
+            while read subdomain; do
+              status=$(curl -sk -o /dev/null -w "%{http_code}" \
+                --max-time 10 "https://$subdomain" || echo "000")
+              if [ "$status" != "000" ] && [ "$status" != "404" ]; then
+                echo "[LIVE] $subdomain — Status: $status"
+              fi
+            done < subdomains.txt
+          else
+            echo "No subdomains found to probe"
+          fi
+
+      - name: Upload Subdomain Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: subdomain-results
+          path: subdomains.txt
+
   sca-trivy:
     runs-on: ubuntu-latest
     steps:
