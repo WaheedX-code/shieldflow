@@ -164,7 +164,7 @@ jobs:
             nuclei-results.txt
             nuclei.sarif
 
-    subdomain-discovery:
+  subdomain-discovery:
     runs-on: ubuntu-latest
     if: ${{ inputs.target-url != '' }}
     steps:
