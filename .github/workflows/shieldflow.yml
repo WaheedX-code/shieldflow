@@ -61,19 +61,25 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Fetch robots.txt
+        env:
+          TARGET_URL: ${{ inputs.target-url }}
         run: |
           echo "=== robots.txt ===" 
-          curl -s ${{ inputs.target-url }}/robots.txt | tee robots.txt
+          curl -s "$TARGET_URL/robots.txt" | tee robots.txt
           echo ""
           echo "=== Disallowed paths (potential targets) ==="
           grep "Disallow" robots.txt | awk '{print $2}'
 
       - name: Fetch sitemap
+        env:
+          TARGET_URL: ${{ inputs.target-url }}
         run: |
           echo "=== Sitemap ==="
-          curl -s ${{ inputs.target-url }}/sitemap.xml | tee sitemap.xml
+          curl -s "$TARGET_URL/sitemap.xml" | tee sitemap.xml
 
       - name: Check common sensitive paths
+        env:
+          TARGET_URL: ${{ inputs.target-url }}
         run: |
           echo "=== Probing sensitive paths ==="
           paths=(
@@ -94,9 +100,9 @@ jobs:
             "/.git"
           )
           for path in "${paths[@]}"; do
-            status=$(curl -s -o /dev/null -w "%{http_code}" ${{ inputs.target-url }}$path)
+            status=$(curl -s -o /dev/null -w "%{http_code}" "$TARGET_URL$path")
             if [ "$status" != "404" ]; then
-              echo "[FOUND] ${{ inputs.target-url }}$path — Status: $status"
+              echo "[FOUND] $TARGET_URL$path — Status: $status"
             fi
           done
 
