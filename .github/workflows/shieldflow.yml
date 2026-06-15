@@ -55,6 +55,61 @@ jobs:
           name: semgrep-results
           path: semgrep.sarif
 
+  recon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Fetch robots.txt
+        run: |
+          echo "=== robots.txt ===" 
+          curl -s ${{ inputs.target-url }}/robots.txt | tee robots.txt
+          echo ""
+          echo "=== Disallowed paths (potential targets) ==="
+          grep "Disallow" robots.txt | awk '{print $2}'
+
+      - name: Fetch sitemap
+        run: |
+          echo "=== Sitemap ==="
+          curl -s ${{ inputs.target-url }}/sitemap.xml | tee sitemap.xml
+
+      - name: Check common sensitive paths
+        run: |
+          echo "=== Probing sensitive paths ==="
+          paths=(
+            "/admin"
+            "/api"
+            "/api/v1"
+            "/api/v2"
+            "/.env"
+            "/backup"
+            "/config"
+            "/dashboard"
+            "/login"
+            "/register"
+            "/swagger"
+            "/api-docs"
+            "/graphql"
+            "/phpinfo.php"
+            "/.git"
+          )
+          for path in "${paths[@]}"; do
+            status=$(curl -s -o /dev/null -w "%{http_code}" ${{ inputs.target-url }}$path)
+            if [ "$status" != "404" ]; then
+              echo "[FOUND] ${{ inputs.target-url }}$path — Status: $status"
+            fi
+          done
+
+      - name: Upload Recon Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recon-results
+          path: |
+            robots.txt
+            sitemap.xml
+
+
   sca-trivy:
     runs-on: ubuntu-latest
     steps:
@@ -170,6 +225,7 @@ jobs:
       - sast-semgrep
       - sca-trivy
       - gitleaks-scan
+      - recon
       - dast-zap
     if: always()
     steps:
@@ -200,6 +256,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: gitleaks-results
+          path: reports/
+        continue-on-error: true
+
+      - name: Download Recon Results
+        uses: actions/download-artifact@v4
+        with:
+          name: recon-results
           path: reports/
         continue-on-error: true
 
