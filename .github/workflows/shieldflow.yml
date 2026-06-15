@@ -133,6 +133,13 @@ jobs:
             severity: critical,high,medium
           continue-on-error: true
 
+        - name: Ensre SARIF exists
+          run: |
+            touch nuclei-results.txt
+            if [! -f nuclei.sarif ]; then
+              echo '{"version":"2.1.0","runs":[]}' > nuclei.sarif
+            fi
+
         - name: Upload Nuclei SARIF
           uses: github/codeql-action/upload-sarif@v4
           if: always()
@@ -164,7 +171,7 @@ jobs:
             echo "Extracted domain: $domain"
 
         - name: Run Subfinder
-          uses: projectdiscovery/subfinder-action@v1
+          uses: projectdiscovery/subfinder-action@v1.0.0
           with:
             domain: ${{ env.TARGET_DOMAIN }}
             output: subdomains.txt
