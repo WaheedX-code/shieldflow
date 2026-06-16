@@ -118,6 +118,71 @@ jobs:
             robots.txt
             sitemap.xml
 
+  security-headers-check:
+      runs-on: ubuntu-latest
+      if: ${{ inputs.target-url != '' }}
+      steps:
+        - uses: actions/checkout@v3
+
+        - name: Check Security Headers
+          env:
+            TARGET_URL: ${{ inputs.target-url }}
+          run: |
+            echo "=== Security Headers Check ===" > headers-results.txt
+            headers=$(timeout 10 curl -sI "$TARGET_URL" || echo "")
+
+            if [ -z "$headers" ]; then
+              echo "Could not retrieve headers from target" >> headers-results.txt
+            else
+              echo "$headers" >> headers-results.txt
+              echo "" >> headers-results.txt
+              echo "=== Analysis ===" >> headers-results.txt
+
+              check_header() {
+                header_name=$1
+                if echo "$headers" | grep -qi "$header_name"; then
+                  echo "[OK] $header_name present" >> headers-results.txt
+                else
+                  echo "[MISSING] $header_name not found - potential security risk" >> headers-results.txt
+                fi
+              }
+
+              check_header "Content-Security-Policy"
+              check_header "X-Frame-Options"
+              check_header "Strict-Transport-Security"
+              check_header "X-Content-Type-Options"
+              check_header "Referrer-Policy"
+              check_header "Permissions-Policy"
+              check_header "X-XSS-Protection"
+
+              echo "" >> headers-results.txt
+              echo "=== Server Info Disclosure Check ===" >> headers-results.txt
+              if echo "$headers" | grep -qi "Server:"; then
+                server_value=$(echo "$headers" | grep -i "Server:" | head -1)
+                echo "[WARNING] Server header exposed: $server_value" >> headers-results.txt
+              else
+                echo "[OK] Server header not exposed" >> headers-results.txt
+              fi
+
+              if echo "$headers" | grep -qi "X-Powered-By:"; then
+                powered_value=$(echo "$headers" | grep -i "X-Powered-By:" | head -1)
+                echo "[WARNING] X-Powered-By header exposed: $powered_value" >> headers-results.txt
+              else
+                echo "[OK] X-Powered-By header not exposed" >> headers-results.txt
+              fi
+            fi
+
+            touch headers-results.txt
+            cat headers-results.txt
+
+        - name: Upload Headers Report
+          uses: actions/upload-artifact@v4
+          if: always()
+          with:
+            name: headers-report
+            path: headers-results.txt
+          continue-on-error: true
+
   nuclei-scan:
       runs-on: ubuntu-latest
       if: ${{ inputs.target-url != '' }}
@@ -381,6 +446,9 @@ jobs:
       - sca-trivy
       - gitleaks-scan
       - recon
+      - ssl-check
+      - subdomain-discovery
+      - security-headers-check
       - nuclei-scan
       - dast-zap
     if: always()
