@@ -764,8 +764,13 @@ jobs:
           retention-days: ${{ inputs.artifact-retention-days}}
 
       - name: Post to SOAR (Shuffle)
-        if: secrets.shuffle-webhook-url != ''
+        env:
+          SHUFFLE_WEBHOOK_URL: ${{ secrets.shuffle-webhook-url }}
         run: |
+          if [ -z "$SHUFFLE_WEBHOOK_URL" ]; then
+            echo "No SHUFFLE_WEBHOOK_URL set - skipping SOAR notification"
+            exit 0
+          fi
           REPORT=$(cat shieldflow-report.json)
           curl -s -X POST "${{ secrets.shuffle-webhook-url }}" \
             -H "Content-Type: application/json" \
