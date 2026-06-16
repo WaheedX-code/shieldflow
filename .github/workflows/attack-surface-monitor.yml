@@ -1,0 +1,299 @@
+name: ShieldFlow — Attack Surface Monitor
+
+# ─────────────────────────────────────────────────────────────────────────────
+# This workflow runs on a schedule to continuously monitor your external attack
+# surface. It detects NEW findings since the last run and only alerts on those.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      domains:
+        description: "Comma-seperated domains to monitor (e.g. example.com,api.example.com)"
+        required: false
+        type: string
+        default: ''
+      nuclei-severity:
+        description: "Nuclei severity filter"
+        required: false
+        type: string
+        default: "critical,high"
+      nuclei-rate-limit:
+        description: "Nuclei max requests per second"
+        required: false
+        type: string
+        default: "30"
+      nuclei-concurrency:
+        description: "Nuclei parallel executions"
+        required: false
+        type: string
+        default: "5"
+      artifact-retention-days:
+        description: "How many days to keep scan artifacts"
+        required: false
+        type: string
+        default: "30"
+      force-full-report:
+        description: "Report all findings (not just new ones)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  security-events: write
+  actions: read
+  contents: write
+  issues: write
+
+jobs:
+  surface-monitor:
+    name: "Attack Surface Monitor"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+      - name: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Build  domain list
+        run: |
+          # Priority 1: domains passed as workflows input (comma-seperated)
+          # Priority 2: .shieldflow/domains.txt in the user repo
+          # Priority 3: nothing - exit gracefully with a message
+          if [ -n "${{ inputs.domains }}" ]; then
+            echo "${{ inputs.domains }}" | tr ',' '\n' | xargs -I{} echo {} > /tmp/domains.txt
+          elif [ -f ".shieldflow/domains.txt" ]; then
+            grep -v '^#' .shieldflow/domains.txt | grep -v '^$' > /tmp/domains.txt
+          else
+            echo "No domains provided"
+            echo "Pass domains via the workflow input or add a .shieldflow/domains.txt file to your repo."
+            exit 0
+          fi
+          echo "Monitoring domains"
+          cat /tmp/domains.txt
+
+      - name: Restore findings baseline
+        uses: actions/cache@c4
+        with:
+          path: .shieldflow-cache/
+          key: shieldflow-baseline-${{ runner.os }}
+          restore-keys: |
+            shieldflow-baseline-
+
+      - name: Create cache dir if missing
+        run: mkdir -p .shieldflow-cache
+
+      - name: Install tools
+        run: |
+          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+          pip install sslyze --quiet
+          nuclei -update-templates -silent
+        env:
+          GO111MODULE: on
+
+      - name: Run attack surface scan
+        run: |
+          mkdir -p scan-output
+
+          NUCLEI_SEVERITY="${{ inputs.nuclei-severity || 'critical,high' }}"
+          NUCLEI_RATE_LIMIT="${{ inputs.nuclei-rate-limit || '30' }}"
+          NUCLEI_CONCURRENCY="${{ inputs.nuclei-concurrency || '5' }}"
+
+          while IFS= read -r DOMAIN; do
+            DOMAIN=$(echo "$DOMAIN" | xargs)
+            [ -z "$DOMAIN" ] && continue
+
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Scanning: $DOMAIN"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+            SAFE_DOMAIN=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
+
+            # Subdomains
+            subfinder -d "$DOMAIN" -silent -o "scan-output/${SAFE_DOMAIN}_subs.txt" || true
+
+            # Live hosts
+            if [ -s "scan-output/${SAFE_DOMAIN}_subs.txt" ]; then
+              cat "scan-output/${SAFE_DOMAIN}_subs.txt" | \
+                httpx -silent -status-code \
+                -o "scan-output/${SAFE_DOMAIN}_live.txt" || true
+            fi
+
+            # Nuclei on live hosts (critical + high only)
+            if [ -s "scan-output/${SAFE_DOMAIN}_live.txt" ]; then
+              awk '{print $1}' "scan-output/${SAFE_DOMAIN}_live.txt" > /tmp/nuclei-targets.txt
+              nuclei \
+                -list /tmp/nuclei-targets.txt \
+                -severity "$NUCLEI_SEVERITY" \
+                -tags "cve,misconfig,exposure,takeover" \
+                -exclude-tags "dos,fuzzing,headless" \
+                -rate-limit "$NUCLEI_RATE_LIMIT" \
+                -concurrency "$NUCLEI_CONCURRENCY" \
+                -json-export "scan-output/${SAFE_DOMAIN}_nuclei.json" \
+                -silent || true
+            fi
+
+          done < /tmp/domains.txt
+
+      - name: Delta detection (new vs. previously seen findings)
+        id: delta
+        run: |
+          python3 << 'PYTHON'
+          import json, glob, os, hashlib
+          from datetime import datetime, timezone
+
+          # Load previous baseline
+          baseline_path = ".shieldflow-cache/findings-baseline.json"
+          if os.path.exists(baseline_path):
+              baseline = json.load(open(baseline_path))
+              seen_fingerprints = set(baseline.get("fingerprints", []))
+              print(f"Loaded baseline: {len(seen_fingerprints)} previously seen findings")
+          else:
+              seen_fingerprints = set()
+              print("No baseline found — all findings will be treated as new")
+
+          # Parse current scan findings
+          all_findings = []
+          for nuclei_file in glob.glob("scan-output/*_nuclei.json"):
+              try:
+                  data = json.load(open(nuclei_file))
+                  if isinstance(data, list):
+                      all_findings.extend(data)
+              except Exception as e:
+                  print(f"Warning: {nuclei_file}: {e}")
+
+          # Fingerprint each finding for dedup
+          def fingerprint(f):
+              key = f"{f.get('template-id','')}-{f.get('host','')}-{f.get('matched-at','')}"
+              return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+          current_findings = []
+          new_findings = []
+          current_fingerprints = set()
+
+          for f in all_findings:
+              fp = fingerprint(f)
+              current_fingerprints.add(fp)
+              finding = {
+                  "fingerprint": fp,
+                  "template_id": f.get("template-id", "unknown"),
+                  "name": f.get("info", {}).get("name", "Unknown"),
+                  "severity": f.get("info", {}).get("severity", "info"),
+                  "host": f.get("host", f.get("url", "unknown")),
+                  "description": f.get("info", {}).get("description", ""),
+                  "tags": f.get("info", {}).get("tags", []),
+                  "first_seen": datetime.now(timezone.utc).isoformat()
+              }
+              current_findings.append(finding)
+              if fp not in seen_fingerprints:
+                  new_findings.append(finding)
+
+          # Also detect resolved findings (were seen before, now gone)
+          resolved_fingerprints = seen_fingerprints - current_fingerprints
+          print(f"Current findings   : {len(current_findings)}")
+          print(f"NEW findings       : {len(new_findings)}")
+          print(f"Resolved findings  : {len(resolved_fingerprints)}")
+
+          # Write delta report
+          delta_report = {
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+              "new_findings": new_findings,
+              "new_count": len(new_findings),
+              "total_count": len(current_findings),
+              "resolved_count": len(resolved_fingerprints)
+          }
+          json.dump(delta_report, open("delta-report.json", "w"), indent=2)
+
+          # Update baseline for next run
+          new_baseline = {
+              "updated_at": datetime.now(timezone.utc).isoformat(),
+              "fingerprints": list(current_fingerprints),
+              "total": len(current_fingerprints)
+          }
+          os.makedirs(".shieldflow-cache", exist_ok=True)
+          json.dump(new_baseline, open(baseline_path, "w"), indent=2)
+
+          # Set output for next step
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"new_count={len(new_findings)}\n")
+              f.write(f"has_new={'true' if new_findings else 'false'}\n")
+              criticals = [x for x in new_findings if x['severity'] == 'critical']
+              f.write(f"has_critical={'true' if criticals else 'false'}\n")
+
+          PYTHON
+
+      - name: Save baseline cache
+        uses: actions/cache@v4
+        with:
+          path: .shieldflow-cache/
+          key: shieldflow-baseline-${{ runner.os }}
+
+      - name: Create GitHub Issue for new critical findings
+        if: steps.delta.outputs.has_critical == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const delta = JSON.parse(fs.readFileSync('delta-report.json'));
+            const criticals = delta.new_findings.filter(f => f.severity === 'critical');
+
+            let body = `##  ShieldFlow — New Critical Findings\n\n`;
+            body += `**Detected at:** ${delta.generated_at}\n`;
+            body += `**New findings this run:** ${delta.new_count}\n`;
+            body += `**Critical (new):** ${criticals.length}\n\n`;
+            body += `---\n\n`;
+
+            for (const f of criticals) {
+              body += `### [CRITICAL] ${f.name}\n`;
+              body += `- **Template:** \`${f.template_id}\`\n`;
+              body += `- **Host:** \`${f.host}\`\n`;
+              body += `- **Tags:** ${f.tags.join(', ')}\n`;
+              if (f.description) {
+                body += `- **Description:** ${f.description.substring(0, 300)}\n`;
+              }
+              body += `\n`;
+            }
+
+            body += `---\n`;
+            body += `*Auto-created by ShieldFlow Attack Surface Monitor*\n`;
+            body += `[View full run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: ` [ShieldFlow] ${criticals.length} new CRITICAL finding(s) detected`,
+              body: body,
+              labels: ['security', 'critical', 'shieldflow']
+            });
+
+      - name: Save artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: attack-surface-monitor-${{ github.run_number }}
+          path: |
+            scan-output/
+            delta-report.json
+          retention-days: 90
+
+      - name: Print summary
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  ShieldFlow Attack Surface Monitor"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          python3 -c "
+          import json
+          d = json.load(open('delta-report.json'))
+          print(f'  Total findings   : {d[\"total_count\"]}')
+          print(f'  NEW this run     : {d[\"new_count\"]}')
+          print(f'  Resolved         : {d[\"resolved_count\"]}')
+          if d['new_findings']:
+              print()
+              print('  New findings:')
+              for f in d['new_findings'][:10]:
+                  print(f'    [{f[\"severity\"].upper()}] {f[\"name\"]} → {f[\"host\"]}')
+          "
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

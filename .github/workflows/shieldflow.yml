@@ -1,25 +1,90 @@
-name: ShieldFlow AppSec Pipeline
+name: ShieldFlow Security Pipeline
 
 on:
   workflow_call:
     inputs:
       target-url:
-        description: 'URL of the application to scan'
-        required: true
+        description: "URL of running application to scan with ZAP"
+        required: false
         type: string
+        default: ""
       target-image:
-        description: 'Docker image to spin up for scanning (optional)'
+        description: "Docker image to spin up and scan"
         required: false
         type: string
-        default: ''
+        default: ""
       target-port:
-        description: 'Port the application runs on (optional)'
+        description: "Port the application runs on"
         required: false
         type: string
-        default: '3000'
+        default: "3000"
+      target-domain:
+        description: "Domain for recon + subdomain discovery + SSL check"
+        required: false
+        type: string
+        default: ""
+      nuclei-severity:
+        description: "Nuclei severity filter (critical,high,medium,low)"
+        required: false
+        type: string
+        default: "critical,high"
+      nuclei-tags:
+        description: "Nuclei template tags to include"
+        required: false
+        type: string
+        default: "cve,misconfig,exposure,takeover,ssl"
+      nuclei-exclude-tags:
+        description: "Nuclei template tags to exclude"
+        required: false
+        type: string
+        default: "dos,fuzzing,helpers,headless"
+      nuclei-rate-limit:
+        description: "Nuclei max requests per second"
+        required: false
+        type: string
+        default: "50"
+      nuclei-concurrency:
+        description: "Nuclei parallel templates execution"
+        required: false
+        type: string
+        default: "10"
+      semgrep-config:
+        description: "Semgrep ruleset (auto, p/owasp-top-ten, p/python, etc.)"
+        required: false
+        type: string
+        default: "auto"
+      trivy-severity:
+        description: "Trivy Severity filter (CRITICAL,HIGH,MEDIUM,LOW)"
+        required: false
+        type: string
+        default: "CRITICAL,HIGH"
+      trivy-ignore-unfixed:
+        description: "Skip CVEs with no fix available"
+        required: false
+        type: boolean
+        default: true
+      ssl-scan-limit:
+        description: "Max number of subdomains to run SSL checks against"
+        required: false
+        type: string
+        default: "20"
+      zap-scan-type:
+        description: "ZAP scan type: full (active attacks) or baseline (passive only)"
+        required: false
+        type: string
+        default: "full"
+      artifact-retention-days:
+        description: "How many days to keep scan artifacts"
+        required: false
+        type: string
+        default: "30"
+      fail-on-severity:
+        description: "Fail the pipeline if findings at this severity are found (critical,high,none)"
+        required: false
+        type: string
+        default: "critical"
     secrets:
       shuffle-webhook-url:
-        description: 'Shuffle SOAR webhook URL for findings ingestion'
         required: false
 
 permissions:
@@ -28,351 +93,97 @@ permissions:
   contents: read
 
 jobs:
-
-  sast-semgrep:
+  sast:
+    name: "SAST — Semgrep"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Install Semgrep
-        run: pip install semgrep
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Run Semgrep
-        run: |
-          semgrep scan \
-            --config "p/owasp-top-ten" \
-            --config "p/default" \
-            --sarif-output=semgrep.sarif \
-            --error
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: ${{ inputs.semgrep-config }}
+          generateSarif: "1"
+        env:
+          SEMGREP_RULES: ${{ inputs.semgrep-config }}
+        continue-on-error: true
+
       - name: Upload Semgrep SARIF
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: semgrep.sarif
+          category: semgrep-sast
 
-      - name: Upload Semgrep Artifact
+      - name: Save Semgrep results as artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: semgrep-results
           path: semgrep.sarif
+          retention-days: ${{ inputs.artifact-retention-days }}
 
-  recon:
+  sca:
+    name: "SCA — Trivy"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Fetch robots.txt
-        env:
-          TARGET_URL: ${{ inputs.target-url }}
-        run: |
-          echo "=== robots.txt ===" 
-          curl -s "$TARGET_URL/robots.txt" | tee robots.txt
-          echo ""
-          echo "=== Disallowed paths (potential targets) ==="
-          grep "Disallow" robots.txt | awk '{print $2}'
-
-      - name: Fetch sitemap
-        env:
-          TARGET_URL: ${{ inputs.target-url }}
-        run: |
-          echo "=== Sitemap ==="
-          curl -s "$TARGET_URL/sitemap.xml" | tee sitemap.xml
-
-      - name: Check common sensitive paths
-        env:
-          TARGET_URL: ${{ inputs.target-url }}
-        run: |
-          echo "=== Probing sensitive paths ==="
-          paths=(
-            "/admin"
-            "/api"
-            "/api/v1"
-            "/api/v2"
-            "/.env"
-            "/backup"
-            "/config"
-            "/dashboard"
-            "/login"
-            "/register"
-            "/swagger"
-            "/api-docs"
-            "/graphql"
-            "/phpinfo.php"
-            "/.git"
-          )
-          for path in "${paths[@]}"; do
-            status=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 "$TARGET_URL$path" || echo "000")
-            if [ "$status" != "404" ] && [ "$status" != "000" ]; then
-              echo "[FOUND] $TARGET_URL$path — Status: $status"
-            else
-              echo "[NOT FOUND] $path - Status: $status"
-            fi
-          done
-          exit 0
-
-      - name: Upload Recon Results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: recon-results
-          path: |
-            robots.txt
-            sitemap.xml
-
-  security-headers-check:
-      runs-on: ubuntu-latest
-      if: ${{ inputs.target-url != '' }}
-      steps:
-        - uses: actions/checkout@v3
-
-        - name: Check Security Headers
-          env:
-            TARGET_URL: ${{ inputs.target-url }}
-          run: |
-            echo "=== Security Headers Check ===" > headers-results.txt
-            headers=$(timeout 10 curl -sI "$TARGET_URL" || echo "")
-
-            if [ -z "$headers" ]; then
-              echo "Could not retrieve headers from target" >> headers-results.txt
-            else
-              echo "$headers" >> headers-results.txt
-              echo "" >> headers-results.txt
-              echo "=== Analysis ===" >> headers-results.txt
-
-              check_header() {
-                header_name=$1
-                if echo "$headers" | grep -qi "$header_name"; then
-                  echo "[OK] $header_name present" >> headers-results.txt
-                else
-                  echo "[MISSING] $header_name not found - potential security risk" >> headers-results.txt
-                fi
-              }
-
-              check_header "Content-Security-Policy"
-              check_header "X-Frame-Options"
-              check_header "Strict-Transport-Security"
-              check_header "X-Content-Type-Options"
-              check_header "Referrer-Policy"
-              check_header "Permissions-Policy"
-              check_header "X-XSS-Protection"
-
-              echo "" >> headers-results.txt
-              echo "=== Server Info Disclosure Check ===" >> headers-results.txt
-              if echo "$headers" | grep -qi "Server:"; then
-                server_value=$(echo "$headers" | grep -i "Server:" | head -1)
-                echo "[WARNING] Server header exposed: $server_value" >> headers-results.txt
-              else
-                echo "[OK] Server header not exposed" >> headers-results.txt
-              fi
-
-              if echo "$headers" | grep -qi "X-Powered-By:"; then
-                powered_value=$(echo "$headers" | grep -i "X-Powered-By:" | head -1)
-                echo "[WARNING] X-Powered-By header exposed: $powered_value" >> headers-results.txt
-              else
-                echo "[OK] X-Powered-By header not exposed" >> headers-results.txt
-              fi
-            fi
-
-            touch headers-results.txt
-            cat headers-results.txt
-
-        - name: Upload Headers Report
-          uses: actions/upload-artifact@v4
-          if: always()
-          with:
-            name: headers-report
-            path: headers-results.txt
-          continue-on-error: true
-
-  nuclei-scan:
-      runs-on: ubuntu-latest
-      if: ${{ inputs.target-url != '' }}
-      steps:
-        - uses: actions/checkout@v3
-
-        - name: Run Nuclei Scan
-          uses: projectdiscovery/nuclei-action@v2
-          with:
-            target: ${{ inputs.target-url }}
-            output: nuclei-results.txt
-            sarif-export: nuclei.sarif
-            severity: critical,high,medium
-          continue-on-error: true
-
-        - name: Ensre SARIF exists
-          run: |
-            touch nuclei-results.txt
-            if [! -f nuclei.sarif ]; then
-              echo '{"version":"2.1.0","runs":[]}' > nuclei.sarif
-            fi
-
-        - name: Upload Nuclei SARIF
-          uses: github/codeql-action/upload-sarif@v4
-          if: always()
-          with:
-            sarif_file: nuclei.sarif
-          continue-on-error: true
-
-        - name: Upload Nuclei Artifact
-          uses: actions/upload-artifact@v4
-          if: always()
-          with:
-            name: nuclei-results
-            path: |
-              nuclei-results.txt
-              nuclei.sarif
-
-  subdomain-discovery:
-      runs-on: ubuntu-latest
-      if: ${{ inputs.target-url != '' }}
-      steps:
-        - uses: actions/checkout@v3
-
-        - name: Extract Domain
-          env:
-            TARGET_URL: ${{ inputs.target-url }}
-          run: |
-            domain=$(echo "$TARGET_URL" | sed 's|https\?://||' | sed 's|/.*||')
-            echo "TARGET_DOMAIN=$domain" >> $GITHUB_ENV
-            echo "Extracted domain: $domain"
-
-        - name: Run Subfinder
-          env:
-            TARGET_DOMAIN: ${{ env.TARGET_DOMAIN }}
-          run: |
-            go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-            subfinder -d "$TARGET_DOMAIN" -o subdomains.txt -silent || true
-            touch subdomains.txt
-            echo "=== Discovered Subdomains ==="
-            cat subdomains.txt
-            echo "Total: $(wc -l < subdomains.txt) subdomains found"
-
-        - name: Probe Live Subdomains
-          run: |
-            if [ -s subdomains.txt ]; then
-              echo "=== Probing live subdomains ==="
-              while read subdomain; do
-                status=$(curl -sk -o /dev/null -w "%{http_code}" \
-                  --max-time 10 "https://$subdomain" || echo "000")
-                if [ "$status" != "000" ] && [ "$status" != "404" ]; then
-                  echo "[LIVE] $subdomain — Status: $status"
-                fi
-              done < subdomains.txt
-            else
-              echo "No subdomains found to probe"
-            fi
-
-        - name: Upload Subdomain Results
-          uses: actions/upload-artifact@v4
-          if: always()
-          with:
-            name: subdomain-results
-            path: subdomains.txt
-
-  ssl-check:
-      runs-on: ubuntu-latest
-      if: ${{ inputs.target-url != '' }}
-      steps:
-        - uses: actions/checkout@v3
-
-        - name: Extract Domain
-          env:
-            TARGET_URL: ${{ inputs.target-url }}
-          run: |
-            domain=$(echo "$TARGET_URL" | sed 's|https\?://||' | sed 's|/.*||')
-            echo "TARGET_DOMAIN=$domain" >> $GITHUB_ENV
-            echo "Extracted domain: $domain"
-
-        - name: Check SSL Certificate
-          env:
-            TARGET_DOMAIN: ${{ env.TARGET_DOMAIN }}
-          run: |
-            echo "=== SSL Certificate Check ===" > ssl-results.txt
-            timeout 10 bash -c "echo | openssl s_client -connect \"$TARGET_DOMAIN:443\" -servername \"$TARGET_DOMAIN\" 2>/dev/null | openssl x509 -noout -dates -subject -issuer" >> ssl-results.txt 2>&1 || echo "Could not retrieve certificate - site may not support HTTPS" >> ssl-results.txt
-            cat ssl-results.txt
-
-        - name: Check Certificate Expiry
-          env:
-            TARGET_DOMAIN: ${{ env.TARGET_DOMAIN }}
-          run: |
-            echo "=== Certificate Expiry Check ===" >> ssl-results.txt
-            expiry=$(timeout 10 bash -c "echo | openssl s_client -connect \"$TARGET_DOMAIN:443\" -servername \"$TARGET_DOMAIN\" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2" || echo "")
-            if [ -n "$expiry" ]; then
-              echo "Certificate expires: $expiry" >> ssl-results.txt
-              expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null || echo 0)
-              now_epoch=$(date +%s)
-              days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
-              echo "Days until expiry: $days_left" >> ssl-results.txt
-              if [ "$days_left" -lt 30 ] && [ "$days_left" -gt 0 ]; then
-                echo "[WARNING] Certificate expires soon!" >> ssl-results.txt
-              fi
-            else
-              echo "Could not determine expiry date" >> ssl-results.txt
-            fi
-            cat ssl-results.txt
-
-        - name: Check Weak SSL/TLS Protocols
-          env:
-            TARGET_DOMAIN: ${{ env.TARGET_DOMAIN }}
-          run: |
-            echo "=== Checking for weak protocols ===" >> ssl-results.txt
-            for protocol in ssl3 tls1 tls1_1; do
-              result=$(timeout 8 bash -c "echo | openssl s_client -connect \"$TARGET_DOMAIN:443\" -$protocol 2>&1 | grep -i 'Cipher is'" || echo "Not supported")
-              echo "$protocol: $result" >> ssl-results.txt
-            done
-            cat ssl-results.txt
-            touch ssl-results.txt
-
-        - name: Upload SSL Report
-          uses: actions/upload-artifact@v4
-          if: always()
-          with:
-            name: ssl-report
-            path: ssl-results.txt
-          continue-on-error: true
-
-  sca-trivy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Scan Repository Files
+      - name: Run Trivy (filesystem scan)
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'
-          format: 'sarif'
-          output: 'trivy-fs.sarif'
-          severity: 'HIGH,CRITICAL'
+          scan-type: "fs"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-fs.sarif"
+          severity: ${{ inputs.trivy-severity }}
+          ignore-unfixed: ${{ inputs.trivy-ignore-unfixed }}
+        continue-on-error: true
 
-      - name: Scan Docker Image
-        if: ${{ inputs.target-image != '' }}
+      - name: Run Trivy (Docker image scan)
+        if: inputs.target-image != ''
         uses: aquasecurity/trivy-action@master
-        env:
-          TARGET_IMAGE: ${{ inputs.target-image }}
         with:
-          scan-type: 'image'
+          scan-type: "image"
           image-ref: ${{ inputs.target-image }}
-          format: 'sarif'
-          output: 'trivy-image.sarif'
-          severity: 'HIGH,CRITICAL'
+          format: "sarif"
+          output: "trivy-image.sarif"
+          severity: ${{ inputs.trivy-severity }}
+          ignore-unfixed: ${{ inputs.trivy-ignore-unfixed }}
+        continue-on-error: true
 
-      - name: Upload Trivy Results
-        uses: github/codeql-action/upload-sarif@v4
+      - name: Upload Trivy filesystem SARIF
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: '.'
+          sarif_file: trivy-fs.sarif
+          category: trivy-filesystem
 
-      - name: Upload Trivy Artifact
+      - name: Upload Trivy image SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: inputs.target-image != '' && always()
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+      - name: Save Trivy results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: trivy-results
-          path: trivy-fs.sarif
+          path: "trivy-*.sarif"
+          retention-days: ${{ inputs.artifact-retention-days }}
 
-  gitleaks-scan:
+  secrets:
+    name: "Secrets — Gitleaks"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code (full history)
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -380,137 +191,606 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
 
-      - name: Upload Gitleaks Artifact
+      - name: Save Gitleaks report
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: gitleaks-results
           path: results.sarif
+          retention-days: ${{ inputs.artifact-retention-days}}
 
-  dast-zap:
-    if: ${{ inputs.target-url != '' }}
+  recon:
+    name: "Recon — Subfinder + httpx"
     runs-on: ubuntu-latest
+    if: inputs.target-domain != ''
+    outputs:
+      live-subdomains-found: ${{ steps.recon.outputs.found }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Start Docker target
-        if: ${{ inputs.target-image != '' }}
-        env:
-          TARGET_IMAGE: ${{ inputs.target-image }}
-          TARGET_PORT: ${{ inputs.target-port }}
+      - name: Install ProjectDiscovery tools
         run: |
-          docker pull $TARGET_IMAGE
-          docker run -d --name target-app \
-            -p "$TARGET_PORT:$TARGET_PORT" \
-            $TARGET_IMAGE
-          sleep 30
-          echo "Target started on port $TARGET_PORT"
-
-      - name: Wait for URL target
-        if: ${{ inputs.target-image == '' }}
+          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
         env:
-          TARGET_URL: ${{ inputs.target-url }}
+          GO111MODULE: on
+
+      - name: Passive subdomain enumeration
+        id: recon
         run: |
-          echo "Scanning existing target: $TARGET_URL"
-          sleep 5
+          DOMAIN="${{ inputs.target-domain }}"
+          echo "=== ShieldFlow Recon: $DOMAIN ==="
 
-      - name: Run ZAP Full Scan
-        uses: zaproxy/action-full-scan@v0.10.0
-        with:
-          target: ${{ inputs.target-url }}
-          fail_action: true
-          cmd_options: '-a'
+          subfinder -d "$DOMAIN" \
+            -silent \
+            -o subdomains-raw.txt \
+            -timeout 30
 
-      - name: Upload ZAP Report
+          SUBDOMAIN_COUNT=$(wc -l < subdomains-raw.txt 2>/dev/null || echo 0)
+          echo "Discovered $SUBDOMAIN_COUNT subdomains"
+
+          cat subdomains-raw.txt | dnsx -silent -resp -o subdomains-resolved.txt
+
+          cat subdomains-resolved.txt | \
+            awk '{print $1}' | \
+            httpx -silent \
+                  -status-code \
+                  -title \
+                  -tech-detect \
+                  -o live-subdomains.txt
+
+          LIVE_COUNT=$(wc -l < live-subdomains.txt 2>/dev/null || echo 0)
+          echo "Live subdomains: $LIVE_COUNT"
+          echo "found=$LIVE_COUNT" >> $GITHUB_OUTPUT
+
+          cat subdomains-raw.txt | dnsx -cname -silent | \
+            grep -E "(github\.io|herokuapp\.com|s3\.amazonaws\.com|azurewebsites\.net|ghost\.io|surge\.sh|netlify\.app)" \
+            > takeover-candidates.txt 2>/dev/null || true
+
+          TAKEOVER_COUNT=$(wc -l < takeover-candidates.txt 2>/dev/null || echo 0)
+          if [ "$TAKEOVER_COUNT" -gt 0 ]; then
+            echo "  POTENTIAL SUBDOMAIN TAKEOVER CANDIDATES: $TAKEOVER_COUNT"
+            cat takeover-candidates.txt
+          fi
+
+      - name: Save recon results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: zap-report
+          name: recon-results
           path: |
-            report_html.html
-            report_json.json
-            report_md.md
+            subdomains-raw.txt
+            subdomains-resolved.txt
+            live-subdomains.txt
+            takeover-candidates.txt
+          retention-days: ${{ inputs.artifact-retention-days }}
 
-      - name: Stop Docker target
-        if: ${{ inputs.target-image != '' }}
-        run: |
-          docker stop target-app
-          docker rm target-app
-
-  notify-soar:
+  ssl-check:
+    name: "SSL — Certificate Analysis"
     runs-on: ubuntu-latest
-    needs:
-      - sast-semgrep
-      - sca-trivy
-      - gitleaks-scan
-      - recon
-      - ssl-check
-      - subdomain-discovery
-      - security-headers-check
-      - nuclei-scan
-      - dast-zap
-    if: always()
+    if: inputs.target-domain != ''
+    needs: recon
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Download Semgrep SARIF
-        uses: actions/download-artifact@v4
-        with:
-          name: semgrep-results
-          path: reports/
-        continue-on-error: true
+      - name: Install sslyze
+        run: |
+          pip install sslyze --quiet
 
-      - name: Download ZAP Results
-        uses: actions/download-artifact@v4
-        with:
-          name: zap-report
-          path: reports/
-        continue-on-error: true
-
-      - name: Download Trivy Results
-        uses: actions/download-artifact@v4
-        with:
-          name: trivy-results
-          path: reports/
-        continue-on-error: true
-
-      - name: Download Gitleaks Results
-        uses: actions/download-artifact@v4
-        with:
-          name: gitleaks-results
-          path: reports/
-        continue-on-error: true
-
-      - name: Download Recon Results
+      - name: Download live subdomains
         uses: actions/download-artifact@v4
         with:
           name: recon-results
-          path: reports/
         continue-on-error: true
 
-      - name: Download Nuclei Results
+      - name: Run SSL checks
+        run: |
+          DOMAIN="${{ inputs.target-domain }}"
+          SSL_LIMIT="${{ inputs.ssl-scan-limit }}"
+
+          echo "$DOMAIN" > ssl-targets.txt
+          if [ -f live-subdomains.txt ]; then
+            awk '{print $1}' live-subdomains.txt | \
+              sed 's|https\?://||' | \
+              cut -d'/' -f1 | \
+              head -"$SSL_LIMIT" >> ssl-targets.txt
+          fi
+          sort -u ssl-targets.txt -o ssl-targets.txt
+
+          echo "=== SSL Analysis for: ==="
+          cat ssl-targets.txt
+
+          SSL_LIMIT_INT=${{ inputs.ssl-scan-limit }}
+
+          python3 << PYTHON
+          import subprocess, json, socket, ssl, os
+          from datetime import datetime, timezone
+
+          ssl_limit = int(os.environ.get("SSL_LIMIT_INT", "20"))
+          targets = open('ssl-targets.txt').read().strip().split('\n')
+          targets = [t.strip() for t in targets if t.strip()][:ssl_limit]
+
+          results = []
+          issues = []
+
+          for target in targets:
+              try:
+                  result = subprocess.run(
+                      ['python3', '-m', 'sslyze', '--json_out', f'{target}.json', target],
+                      capture_output=True, text=True, timeout=30
+                  )
+                  results.append({'target': target, 'status': 'scanned'})
+              except subprocess.TimeoutExpired:
+                  results.append({'target': target, 'status': 'timeout'})
+              except Exception as e:
+                  results.append({'target': target, 'status': 'error', 'error': str(e)})
+
+          for target in targets:
+              try:
+                  ctx = ssl.create_default_context()
+                  with ctx.wrap_socket(socket.socket(), server_hostname=target) as s:
+                      s.settimeout(10)
+                      s.connect((target, 443))
+                      cert = s.getpeercert()
+                      expire_str = cert.get('notAfter', '')
+                      if expire_str:
+                          expire_date = datetime.strptime(expire_str, '%b %d %H:%M:%S %Y %Z').replace(tzinfo=timezone.utc)
+                          now = datetime.now(timezone.utc)
+                          days_left = (expire_date - now).days
+                          if days_left < 30:
+                              issues.append({
+                                  'target': target,
+                                  'issue': 'CERT_EXPIRING_SOON',
+                                  'severity': 'HIGH' if days_left < 7 else 'MEDIUM',
+                                  'detail': f'Certificate expires in {days_left} days ({expire_str})'
+                              })
+              except ssl.SSLError as e:
+                  issues.append({
+                      'target': target,
+                      'issue': 'SSL_ERROR',
+                      'severity': 'HIGH',
+                      'detail': str(e)
+                  })
+              except Exception:
+                  pass
+
+          report = {
+              'tool': 'ShieldFlow SSL Check',
+              'timestamp': datetime.now(timezone.utc).isoformat(),
+              'scanned': len(results),
+              'issues': issues,
+              'details': results
+          }
+          json.dump(report, open('ssl-report.json', 'w'), indent=2)
+          print(json.dumps({'issues_found': len(issues), 'scanned': len(results)}, indent=2))
+          if issues:
+              print('\n⚠! SSL ISSUES FOUND:')
+              for i in issues:
+                  print(f'  [{i[\"severity\"]}] {i[\"target\"]}: {i[\"detail\"]}')
+          PYTHON
+        env:
+          SSL_LIMIT_INT: ${{ inputs.ssl-scan-limit }}
+
+      - name: Save SSL results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ssl-results
+          path: |
+            ssl-report.json
+            ssl-targets.txt
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+  nuclei-scan:
+    name: "Nuclei — Vulnerability Scan"
+    runs-on: ubuntu-latest
+    needs: [recon]
+    if: inputs.target-url != '' || inputs.target-domain != ''
+    steps:
+      - name: Install Nuclei
+        run: |
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.3.7
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+        env:
+          GO111MODULE: on
+
+      - name: Update Nuclei templates
+        run: nuclei -update-templates -silent
+
+      - name: Download recon results
         uses: actions/download-artifact@v4
         with:
-          name: nuclei-results
-          path: reports/
+          name: recon-results
         continue-on-error: true
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
-      - name: Install dependencies
-        run: pip install requests
-
-      - name: POST findings to Shuffle
-        env:
-          SHUFFLE_WEBHOOK_URL: ${{ secrets.SHUFFLE_WEBHOOK_URL || '' }}
+      - name: Build scan targets
         run: |
-          if [ -n "$SHUFFLE_WEBHOOK_URL" ]; then
-            python3 soar/soar_connector.py
-          else
-            echo "No SHUFFLE_WEBHOOK_URL set - skipping SOAR notification"
+          > nuclei-targets.txt
+
+          if [ -n "${{ inputs.target-url }}" ]; then
+            echo "${{ inputs.target-url }}" >> nuclei-targets.txt
           fi
+
+          if [ -f live-subdomains.txt ]; then
+            awk '{print $1}' live-subdomains.txt >> nuclei-targets.txt
+          fi
+
+          sort -u nuclei-targets.txt -o nuclei-targets.txt
+          echo "=== Nuclei will scan $(wc -l < nuclei-targets.txt) targets ==="
+          cat nuclei-targets.txt
+
+      - name: Run Nuclei (scoped templates)
+        run: |
+          # ─── WHY THIS TEMPLATE SELECTION ───────────────────────────────
+          # We explicitly exclude:
+          #   -fuzzing/* : generates massive noise, needs manual triage
+          #   -dos/*     : can take down target, NOT safe in CI
+          #   -helpers/* : internal templates, not findings
+          #
+          # We focus on:
+          #   - CVEs (known exploitable vulnerabilities)
+          #   - misconfigurations (exposed panels, open redirects, etc.)
+          #   - exposures (leaked files, API keys, sensitive data)
+          #   - takeovers (subdomain and service takeovers)
+          #   - ssl (certificate and TLS issues)
+          # ───────────────────────────────────────────────────────────────
+
+          nuclei \
+            -list nuclei-targets.txt \
+            -severity "${{ inputs.nuclei-severity }}" \
+            -tags "cve,misconfig,exposure,takeover,ssl" \
+            -exclude-tags "dos,fuzzing,helpers,headless" \
+            -rate-limit ${{ inputs.nuclei-rate-limit }} \
+            -concurrency ${{ inputs.nuclei-concurrency }} \
+            -timeout ${{ inputs.nuclei-timeout }} \
+            -retries 1 \
+            -json-export nuclei-findings.json \
+            -sarif-export nuclei-findings.sarif \
+            -silent \
+            -no-color \
+            || true
+
+          FINDING_COUNT=$(jq '. | length' nuclei-findings.json 2>/dev/null || echo 0)
+          echo "Nuclei findings: $FINDING_COUNT"
+
+      - name: Upload Nuclei SARIF to Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: nuclei-findings.sarif
+          category: nuclei-scan
+        continue-on-error: true
+
+      - name: Save Nuclei results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nuclei-results
+          path: |
+            nuclei-findings.json
+            nuclei-findings.sarif
+            nuclei-targets.txt
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+  dast:
+    name: "DAST — OWASP ZAP"
+    runs-on: ubuntu-latest
+    if: inputs.target-url != '' || inputs.target-image != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set ZAP scan type
+        run: |
+          if [ "${{ inputs.zap-scan-type }}" = "baseline" ]; then
+            echo "SCAN_SCRIPT=zap-baseline.py" >> $GITHUB_ENV
+          else
+            echo "SCAN_SCRIPT=zap-full-scan.py" >> $GITHUB_ENV
+          fi
+
+      - name: Start target app (Docker image mode)
+        if: inputs.target-image != ''
+        run: |
+          docker network create shieldflow-net
+
+          docker run -d \
+            --name target-app \
+            --network shieldflow-net \
+            -p ${{ inputs.target-port }}:${{ inputs.target-port }} \
+            ${{ inputs.target-image }}
+
+          echo "Waiting for app to start..."
+          for i in $(seq 1 12); do
+            if curl -sf "http://localhost:${{ inputs.target-port }}" > /dev/null 2>&1; then
+              echo "App is ready!"
+              break
+            fi
+            echo "  attempt $i/12..."
+            sleep 5
+          done
+
+          echo "ZAP_TARGET=http://target-app:${{ inputs.target-port }}" >> $GITHUB_ENV
+
+      - name: Set ZAP target (URL mode)
+        if: inputs.target-url != '' && inputs.target-image == ''
+        run: |
+          echo "ZAP_TARGET=${{ inputs.target-url }}" >> $GITHUB_ENV
+
+      - name: Run ZAP Scan
+        run: |
+          mkdir -p zap-output
+
+          if [ -n "${{ inputs.target-image }}" ]; then
+            docker run --rm \
+              --network shieldflow-net \
+              -v $(pwd)/zap-output:/zap/wrk/:rw \
+              ghcr.io/zaproxy/zaproxy:stable \
+              $SCAN_SCRIPT \
+                -t "$ZAP_TARGET" \
+                -J zap-report.json \
+                -r zap-report.html \
+                -x zap-report.xml \
+                -I \
+                -l WARN \
+                -m 5 \
+                --auto
+          else
+            docker run --rm \
+              -v $(pwd)/zap-output:/zap/wrk/:rw \
+              ghcr.io/zaproxy/zaproxy:stable \
+              $SCAN_SCRIPT \
+                -t "$ZAP_TARGET" \
+                -J zap-report.json \
+                -r zap-report.html \
+                -x zap-report.xml \
+                -I \
+                -l WARN \
+                -m 5 \
+                --auto
+          fi || true
+
+      - name: Stop target app container
+        if: inputs.target-image != ''
+        run: |
+          docker stop target-app || true
+          docker rm target-app || true
+          docker network rm shieldflow-net || true
+
+      - name: Save ZAP report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-dast-results
+          path: zap-output/
+          retention-days: ${{ inputs.artifact-retention-days }}
+
+  unified-report:
+    name: "Report — Unified Findings"
+    runs-on: ubuntu-latest
+    needs: [sast, sca, secrets, nuclei-scan, dast, ssl-check]
+    if: always()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-results/
+        continue-on-error: true
+
+      - name: Generate unified report
+        run: |
+          pip install jinja2 --quiet
+
+          python3 << 'PYTHON'
+          import json
+          import os
+          import glob
+          from datetime import datetime, timezone
+
+          report = {
+              "tool": "ShieldFlow",
+              "version": "2.0",
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+              "repository": os.environ.get("GITHUB_REPOSITORY", "unknown"),
+              "run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
+              "commit": os.environ.get("GITHUB_SHA", "unknown")[:8],
+              "summary": {
+                  "critical": 0,
+                  "high": 0,
+                  "medium": 0,
+                  "low": 0,
+                  "total": 0
+              },
+              "findings": []
+          }
+
+          severity_map = {
+              "critical": 4,
+              "high": 3,
+              "medium": 2,
+              "low": 1,
+              "info": 0
+          }
+
+          nuclei_files = glob.glob("all-results/nuclei-results/nuclei-findings.json")
+          for f in nuclei_files:
+              try:
+                  data = json.load(open(f))
+                  if not isinstance(data, list):
+                      continue
+                  for item in data:
+                      sev = item.get("info", {}).get("severity", "info").lower()
+                      finding = {
+                          "source": "nuclei",
+                          "id": item.get("template-id", "unknown"),
+                          "name": item.get("info", {}).get("name", "Unknown"),
+                          "severity": sev,
+                          "target": item.get("host", item.get("url", "unknown")),
+                          "description": item.get("info", {}).get("description", ""),
+                          "tags": item.get("info", {}).get("tags", []),
+                          "reference": item.get("info", {}).get("reference", [])
+                      }
+                      report["findings"].append(finding)
+                      if sev in report["summary"]:
+                          report["summary"][sev] += 1
+              except Exception as e:
+                  print(f"Warning: could not parse {f}: {e}")
+
+          ssl_files = glob.glob("all-results/ssl-results/ssl-report.json")
+          for f in ssl_files:
+              try:
+                  data = json.load(open(f))
+                  for issue in data.get("issues", []):
+                      sev = issue.get("severity", "medium").lower()
+                      finding = {
+                          "source": "ssl-check",
+                          "id": issue.get("issue", "ssl-issue"),
+                          "name": issue.get("issue", "SSL Issue"),
+                          "severity": sev,
+                          "target": issue.get("target", "unknown"),
+                          "description": issue.get("detail", ""),
+                          "tags": ["ssl", "certificate"],
+                          "reference": []
+                      }
+                      report["findings"].append(finding)
+                      if sev in report["summary"]:
+                          report["summary"][sev] += 1
+              except Exception as e:
+                  print(f"Warning: could not parse {f}: {e}")
+
+          sarif_sources = {
+              "semgrep-results/semgrep.sarif": "semgrep",
+              "trivy-results/trivy-fs.sarif": "trivy-fs",
+              "trivy-results/trivy-image.sarif": "trivy-image",
+              "gitleaks-results/results.sarif": "gitleaks"
+          }
+
+          for sarif_path, source_name in sarif_sources.items():
+              full_path = f"all-results/{sarif_path}"
+              if not os.path.exists(full_path):
+                  continue
+              try:
+                  data = json.load(open(full_path))
+                  for run in data.get("runs", []):
+                      rules = {r["id"]: r for r in run.get("tool", {}).get("driver", {}).get("rules", [])}
+                      for result in run.get("results", []):
+                          rule_id = result.get("ruleId", "unknown")
+                          rule = rules.get(rule_id, {})
+
+                          # Map SARIF level to severity
+                          level = result.get("level", "warning")
+                          level_map = {
+                              "error": "high",
+                              "warning": "medium",
+                              "note": "low",
+                              "none": "info"
+                          }
+                          sev = level_map.get(level, "medium")
+
+                          props = result.get("properties", {})
+                          if "severity" in props:
+                              sev = props["severity"].lower()
+
+                          locations = result.get("locations", [])
+                          target = "unknown"
+                          if locations:
+                              uri = locations[0].get("physicalLocation", {}).get("artifactLocation", {}).get("uri", "")
+                              line = locations[0].get("physicalLocation", {}).get("region", {}).get("startLine", "")
+                              target = f"{uri}:{line}" if line else uri
+
+                          message = result.get("message", {}).get("text", "")
+                          rule_name = rule.get("name", rule_id)
+
+                          finding = {
+                              "source": source_name,
+                              "id": rule_id,
+                              "name": rule_name,
+                              "severity": sev,
+                              "target": target,
+                              "description": message,
+                              "tags": [source_name],
+                              "reference": []
+                          }
+                          report["findings"].append(finding)
+                          if sev in report["summary"]:
+                              report["summary"][sev] += 1
+              except Exception as e:
+                  print(f"Warning: could not parse {full_path}: {e}")
+
+          report["findings"].sort(
+              key=lambda x: severity_map.get(x["severity"].lower(), 0),
+              reverse=True
+          )
+          report["summary"]["total"] = len(report["findings"])
+
+          json.dump(report, open("shieldflow-report.json", "w"), indent=2)
+
+          s = report["summary"]
+          print("\n" + "="*50)
+          print(f"  ShieldFlow — Scan Complete")
+          print("="*50)
+          print(f"  Repository : {report['repository']}")
+          print(f"  Commit     : {report['commit']}")
+          print(f"  Timestamp  : {report['generated_at']}")
+          print("="*50)
+          print(f"  CRITICAL   : {s['critical']}")
+          print(f"  HIGH       : {s['high']}")
+          print(f"  MEDIUM     : {s['medium']}")
+          print(f"  LOW        : {s['low']}")
+          print(f"  TOTAL      : {s['total']}")
+          print("="*50)
+
+          # Top 10 critical/high findings
+          top = [f for f in report["findings"] if f["severity"] in ("critical","high")][:10]
+          if top:
+              print("\n  TOP FINDINGS (critical/high):")
+              for i, f in enumerate(top, 1):
+                  print(f"  {i}. [{f['severity'].upper()}] [{f['source']}] {f['name']}")
+                  print(f"     → {f['target']}")
+
+          PYTHON
+
+      - name: Save unified report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shieldflow-unified-report
+          path: shieldflow-report.json
+          retention-days: ${{ inputs.artifact-retention-days}}
+
+      - name: Post to SOAR (Shuffle)
+        if: secrets.shuffle-webhook-url != ''
+        run: |
+          REPORT=$(cat shieldflow-report.json)
+          curl -s -X POST "${{ secrets.shuffle-webhook-url }}" \
+            -H "Content-Type: application/json" \
+            -d "$REPORT" \
+            --max-time 30 \
+            || echo "SOAR webhook failed — continuing"
+
+      - name: Fail on severity threshold
+        run: |
+          THRESHOLD="${{ inputs.fail-on-severity }}"
+          if [ "$THRESHOLD" = "none" ]; then
+            echo "Fail-on-severity is set to none - pipeline always passes."
+            exit 0
+          fi
+
+          COUNT=$(python3 -c "
+          import json
+          r= json.load(open('shieldflow-report.json'))
+          print(r['summary'].get('$THRESHOLD', 0))
+          ")
+
+          if [ "$COUNT" -gt 0 ]; then
+            echo " Pipeline failed: $COUNT $THRESHOLD severity findings detected."
+            echo " Review the ShieldFlow unified report artifact."
+            exit 1
+          fi
+          echo " No $THRESHOLD findings. Pipeline passed."
+
