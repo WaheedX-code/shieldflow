@@ -1,4 +1,4 @@
-?name: ShieldFlow Security Pipeline
+name: ShieldFlow Security Pipeline
 
 on:
   workflow_call:
