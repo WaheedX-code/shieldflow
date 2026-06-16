@@ -203,6 +203,68 @@ jobs:
             name: subdomain-results
             path: subdomains.txt
 
+  ssl-check:
+      runs-on: ubuntu-latest
+      if: ${{ inputs.target-url != '' }}
+      steps:
+        - uses: actions/checkout@v3
+
+        - name: Extract Domain
+          env:
+            TARGET_URL: ${{ inputs.target-url }}
+          run: |
+            domain=$(echo "$TARGET_URL" | sed 's|https\?://||' | sed 's|/.*||')
+            echo "TARGET_DOMAIN=$domain" >> $GITHUB_ENV
+            echo "Extracted domain: $domain"
+
+        - name: Check SSL Certificate
+          env:
+            TARGET_DOMAIN: ${{ env.TARGET_DOMAIN }}
+          run: |
+            echo "=== SSL Certificate Check ===" > ssl-results.txt
+            timeout 10 bash -c "echo | openssl s_client -connect \"$TARGET_DOMAIN:443\" -servername \"$TARGET_DOMAIN\" 2>/dev/null | openssl x509 -noout -dates -subject -issuer" >> ssl-results.txt 2>&1 || echo "Could not retrieve certificate - site may not support HTTPS" >> ssl-results.txt
+            cat ssl-results.txt
+
+        - name: Check Certificate Expiry
+          env:
+            TARGET_DOMAIN: ${{ env.TARGET_DOMAIN }}
+          run: |
+            echo "=== Certificate Expiry Check ===" >> ssl-results.txt
+            expiry=$(timeout 10 bash -c "echo | openssl s_client -connect \"$TARGET_DOMAIN:443\" -servername \"$TARGET_DOMAIN\" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2" || echo "")
+            if [ -n "$expiry" ]; then
+              echo "Certificate expires: $expiry" >> ssl-results.txt
+              expiry_epoch=$(date -d "$expiry" +%s 2>/dev/null || echo 0)
+              now_epoch=$(date +%s)
+              days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
+              echo "Days until expiry: $days_left" >> ssl-results.txt
+              if [ "$days_left" -lt 30 ] && [ "$days_left" -gt 0 ]; then
+                echo "[WARNING] Certificate expires soon!" >> ssl-results.txt
+              fi
+            else
+              echo "Could not determine expiry date" >> ssl-results.txt
+            fi
+            cat ssl-results.txt
+
+        - name: Check Weak SSL/TLS Protocols
+          env:
+            TARGET_DOMAIN: ${{ env.TARGET_DOMAIN }}
+          run: |
+            echo "=== Checking for weak protocols ===" >> ssl-results.txt
+            for protocol in ssl3 tls1 tls1_1; do
+              result=$(timeout 8 bash -c "echo | openssl s_client -connect \"$TARGET_DOMAIN:443\" -$protocol 2>&1 | grep -i 'Cipher is'" || echo "Not supported")
+              echo "$protocol: $result" >> ssl-results.txt
+            done
+            cat ssl-results.txt
+            touch ssl-results.txt
+
+        - name: Upload SSL Report
+          uses: actions/upload-artifact@v4
+          if: always()
+          with:
+            name: ssl-report
+            path: ssl-results.txt
+          continue-on-error: true
+
   sca-trivy:
     runs-on: ubuntu-latest
     steps:
