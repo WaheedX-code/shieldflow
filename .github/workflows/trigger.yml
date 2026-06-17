@@ -21,7 +21,7 @@ on:
         description: "Port the application runs on"
         required: false
         type: string
-        default: "3000"
+        default: ""
       target-domain:
         description: "Domain for recon + subdomain discovery + SSL check"
         required: false
