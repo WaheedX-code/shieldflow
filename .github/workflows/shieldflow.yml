@@ -541,33 +541,22 @@ jobs:
           echo "ZAP_TARGET=${{ inputs.target-url }}" >> $GITHUB_ENV
 
       - name: Run ZAP Scan
-        run: |
-          mkdir -p zap-output
+        uses: zaproxy/action-full-scan@v0.10.0
+        if: inputs.zap-scan-type != 'baseline'
+        with:
+          target: ${{ inputs.target-url }}
+          fail_actions: false
+          allow_issue_filing: false
+          artifact_name: zap-dast-results
 
-          if [ -n "${{ inputs.target-image }}" ]; then
-            docker run --rm \
-              --network shieldflow-net \
-              -v $(pwd)/zap-output:/zap/wrk/:rw \
-              ghcr.io/zaproxy/zaproxy:stable \
-              $SCAN_SCRIPT \
-                -t "$ZAP_TARGET" \
-                -J zap-report.json \
-                -r zap-report.html \
-                -x zap-report.xml \
-                -I \
-                -l WARN
-          else
-            docker run --rm \
-              -v $(pwd)/zap-output:/zap/wrk/:rw \
-              ghcr.io/zaproxy/zaproxy:stable \
-              $SCAN_SCRIPT \
-                -t "$ZAP_TARGET" \
-                -J zap-report.json \
-                -r zap-report.html \
-                -x zap-report.xml \
-                -I \
-                -l WARN
-          fi || true
+      - name: Run ZAP Baseline Scan
+        uses: zaproxy/action-full-scan@v0.12.0
+        if: inputs.zap-scan-type == 'baseline'
+        with:
+          target: ${{ inputs.target-url }}
+          fail_actions: false
+          allow_issue_filing: false
+          artifact_name: zap-dast-results
 
       - name: Move ZAP output to expected path
         if: always()
