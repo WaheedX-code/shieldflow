@@ -461,9 +461,9 @@ jobs:
 
           nuclei \
             -list nuclei-targets.txt \
-            -severity "${{ inputs.nuclei-severity }}" \
-            -tags "cve,misconfig,exposure,takeover,ssl" \
-            -exclude-tags "dos,fuzzing,helpers,headless" \
+            -severity ${{ inputs.nuclei-severity }} \
+            -tags ${{ inputs.nuclei-tags }} \
+            -exclude-tags ${{ inputs.nuclei-exclude-tags }} \
             -rate-limit ${{ inputs.nuclei-rate-limit }} \
             -concurrency ${{ inputs.nuclei-concurrency }} \
             -timeout ${{ inputs.nuclei-timeout }} \
@@ -555,8 +555,7 @@ jobs:
                 -r zap-report.html \
                 -x zap-report.xml \
                 -I \
-                -l WARN \
-                --auto
+                -l WARN \ || true
           else
             docker run --rm \
               -v $(pwd)/zap-output:/zap/wrk/:rw \
@@ -568,8 +567,6 @@ jobs:
                 -x zap-report.xml \
                 -I \
                 -l WARN \
-                -m 5 \
-                --auto
           fi || true
 
       - name: Move ZAP output to expected path
