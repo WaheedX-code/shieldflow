@@ -556,7 +556,6 @@ jobs:
                 -x zap-report.xml \
                 -I \
                 -l WARN \
-                -m 5 \
                 --auto
           else
             docker run --rm \
@@ -576,8 +575,7 @@ jobs:
       - name: Move ZAP output to expected path
         if: always()
         run: |
-          mkdir -p zap-output
-          sudo chown -R $USER:$USER zap-output/ || true
+          sudo chown -R $(id -u):$(id -g) zap-output/ || true
           ls -la zap-output/
 
       - name: Stop target app container
