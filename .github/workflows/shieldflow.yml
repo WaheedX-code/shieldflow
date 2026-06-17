@@ -390,7 +390,7 @@ jobs:
           if issues:
               print('\n⚠! SSL ISSUES FOUND:')
               for i in issues:
-                  print(f'  [{i['severity']}] {i['target']}: {i['detail']}")
+                  print(" [{}] {}: {}".format(i["severity"], i["target"], i["detail"]))
           PYTHON
         env:
           SSL_LIMIT_INT: ${{ inputs.ssl-scan-limit }}
@@ -778,7 +778,7 @@ jobs:
           if top:
               print("\n  TOP FINDINGS (critical/high):")
               for i, f in enumerate(top, 1):
-                  print(f"  {i}. [{f['severity'].upper()}] [{f['source']}] {f['name']}")
+                  print(" [{}] {}: {}".format(i["severity"], i["target"], i["detail"]))
                   print(f"     → {f['target']}")
 
           PYTHON
