@@ -390,7 +390,7 @@ jobs:
           if issues:
               print('\n⚠! SSL ISSUES FOUND:')
               for i in issues:
-                  print(f'  [{i[\"severity\"]}] {i[\"target\"]}: {i[\"detail\"]}')
+                  print(f'  [{i['severity']}] {i['target']}: {i['detail']}")
           PYTHON
         env:
           SSL_LIMIT_INT: ${{ inputs.ssl-scan-limit }}
