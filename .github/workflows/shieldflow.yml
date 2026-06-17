@@ -1,4 +1,4 @@
-name: ShieldFlow Security Pipeline
+?name: ShieldFlow Security Pipeline
 
 on:
   workflow_call:
@@ -107,7 +107,7 @@ jobs:
         with:
           config: ${{ inputs.semgrep-config }}
           args: --sarif --output semgrep.sarif
-        cotinue-on-error: true 
+        continue-on-error: true 
 
       - name: Upload Semgrep SARIF
         uses: github/codeql-action/upload-sarif@v4
