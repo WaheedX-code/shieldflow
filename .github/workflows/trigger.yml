@@ -52,6 +52,11 @@ on:
         required: false
         type: string
         default: "10"
+      nuclei-timeout:
+        description: "Nuclei seconds per request"
+        required: false
+        type: string
+        default: 10
       semgrep-config:
         description: "Semgrep ruleset (auto, p/owasp-top-ten, p/python, etc.)"
         required: false
