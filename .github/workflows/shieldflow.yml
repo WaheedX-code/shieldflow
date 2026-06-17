@@ -555,7 +555,7 @@ jobs:
                 -r zap-report.html \
                 -x zap-report.xml \
                 -I \
-                -l WARN \ || true
+                -l WARN
           else
             docker run --rm \
               -v $(pwd)/zap-output:/zap/wrk/:rw \
@@ -566,7 +566,7 @@ jobs:
                 -r zap-report.html \
                 -x zap-report.xml \
                 -I \
-                -l WARN \
+                -l WARN
           fi || true
 
       - name: Move ZAP output to expected path
