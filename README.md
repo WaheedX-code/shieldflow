@@ -5,7 +5,7 @@
 ![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-Reusable_Workflow-2088FF?logo=github-actions)
 ![Security Tools](https://img.shields.io/badge/Tools-Semgrep%20%7C%20Trivy%20%7C%20Gitleaks%20%7C%20ZAP-green)
 
-ShieldFlow is a reusable GitHub Actions security pipeline that automatically scans your code and running applications for vulnerabilities. It integrates four industry-standard security tools into a single workflow, covering static analysis, dependency scanning, secret detection, and dynamic application testing — all reporting directly to your GitHub Security tab.
+ShieldFlow is a reusable GitHub Actions security pipeline that automatically scans both your **code** (SAST, SCA, secrets) and your **external attack surface/running applications** (recon, subdomain discovery, SSL, Nuclei, DAST) — with continuous monitoring and delta-based alerting built in.
 
 -----
 
@@ -40,12 +40,16 @@ It covers the full development lifecycle:
 
 ## Security Tools
 
-|Tool                            |Type             |What It Scans                                     |Findings Location  |
-|--------------------------------|-----------------|--------------------------------------------------|-------------------|
-|[Semgrep](https://semgrep.dev)  |SAST             |Source code vulnerabilities (OWASP Top 10)        |GitHub Security tab|
-|[Trivy](https://trivy.dev)      |SCA              |Dependencies, packages, container images (CVEs)   |GitHub Security tab|
-|[Gitleaks](https://gitleaks.io) |Secrets Detection|Exposed API keys, tokens, passwords in git history|GitHub Security tab|
-|[OWASP ZAP](https://zaproxy.org)|DAST             |Live/running application attacks                  |Actions Artifacts  |
+|Tool                    |Type             |What It Scans                                     |Findings Location  |
+|--------------------|---------------|--------------------------------------------------|-------------------|
+| Semgrep  |SAST             |Source code vulnerabilities (OWASP Top 10)        |GitHub Security tab|
+| Trivy     |SCA              |Dependencies, packages, container images (CVEs)   |GitHub Security tab|
+| Gitleaks |Secrets Detection|Exposed API keys, tokens, passwords in git history|GitHub Security tab|
+| Subfinder + httpx | Recon | Subdomains + live host detection | Artifact |
+| sslyze | SSL | Cert expiry, weak ciphers, TLS version | Artifact + unified report |
+| Nuclei | Vuln scan | CVEs, misconfigs, exposures, takeovers | GitHub Security tab + artifact |
+| OWASP ZAP | DAST | Live application attacks (passive baseline) | Artifact |
+| Delta monitor | Monitoring | New vs. previously seen findings | GitHub Issues + artifact |
 
 -----
 
