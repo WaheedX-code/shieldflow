@@ -79,163 +79,18 @@ All findings → SOAR (if configured)
 
 ## Quick Start
 
-**Step 1** — Copy this file into your repo
-.github/workflows/shieldflow-scan.yml
-[https:
-**Step 2** — Add the following content:
-
-```yaml
-name: Security Scan
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      target-url:
-        description: "URL of running application to scan with ZAP"
-        required: false
-        type: string
-        default: ""
-      target-image:
-        description: "Docker image to spin up and scan"
-        required: false
-        type: string
-        default: ""
-      target-port:
-        description: "Port the application runs on"
-        required: false
-        type: string
-        default: ""
-      target-domain:
-        description: "Domain for recon + subdomain discovery + SSL check"
-        required: false
-        type: string
-        default: ""
-      nuclei-severity:
-        description: "Nuclei severity filter (critical,high,medium,low)"
-        required: false
-        type: string
-        default: "critical,high"
-      nuclei-tags:
-        description: "Nuclei template tags to include"
-        required: false
-        type: string
-        default: "cve,misconfig,exposure,takeover,ssl"
-      nuclei-exclude-tags:
-        description: "Nuclei template tags to exclude"
-        required: false
-        type: string
-        default: "dos,fuzzing,helpers,headless"
-      nuclei-rate-limit:
-        description: "Nuclei max requests per second"
-        required: false
-        type: string
-        default: "50"
-      nuclei-concurrency:
-        description: "Nuclei parallel templates execution"
-        required: false
-        type: string
-        default: "10"
-      nuclei-timeout:
-        description: "Nuclei seconds per request"
-        required: false
-        type: string
-        default: 10
-      semgrep-config:
-        description: "Semgrep ruleset (auto, p/owasp-top-ten, p/python, etc.)"
-        required: false
-        type: string
-        default: "auto"
-      trivy-severity:
-        description: "Trivy Severity filter (CRITICAL,HIGH,MEDIUM,LOW)"
-        required: false
-        type: string
-        default: "CRITICAL,HIGH"
-      trivy-ignore-unfixed:
-        description: "Skip CVEs with no fix available"
-        required: false
-        type: boolean
-        default: true
-      ssl-scan-limit:
-        description: "Max number of subdomains to run SSL checks against"
-        required: false
-        type: string
-        default: "20"
-      zap-scan-type:
-        description: "ZAP scan type: full (active attacks) or baseline (passive only)"
-        required: false
-        type: string
-        default: "full"
-      artifact-retention-days:
-        description: "How many days to keep scan artifacts"
-        required: false
-        type: string
-        default: "30"
-      fail-on-severity:
-        description: "Fail the pipeline if findings at this severity are found (critical,high,none)"
-        required: false
-        type: string
-        default: "critical"
-    secrets:
-      shuffle-webhook-url:
-        required: false
-
-permissions:
-  security-events: write
-  actions: read
-  contents: read
-
-jobs:
-  security-scan:
-    uses: WaheedX-code/shieldflow/.github/workflows/trigger.yml@main
-    with:
-      target-url: ${{ inputs.target-url || vars.TARGET_URL }}
-      target-image: ${{ inputs.target-image || vars.TARGET_IMAGE || '' }}
-      target-port: ${{ inputs.target-port || vars.TARGET_PORT || '' }}
-      target-domain: ${{ inputs.target-domain || vars.TARGET_DOMAIN || '' }}
-      nuclei-severity: ${{ inputs.nuclei-severity || 'critical,high' }}
-      nuclei-tags: ${{ inputs.nuclei-tags || 'cve,misconfig,exposure,takeover,ssl' }}
-      nuclei-exclude-tags: ${{ inputs.nuclei-exclude-tags || 'dos,fuzzing,helpers,headless' }}
-      nuclei-rate-limit: ${{ inputs.nuclei-rate-limit || '50' }}
-      nuclei-concurrency: ${{ inputs.nuclei-concurrency || '10' }}
-      nuclei-timeout: ${{ inputs.nuclei-timeout || '10' }}
-      semgrep-config: ${{ inputs.semgrep-config || 'auto' }}
-      trivy-severity: ${{ inputs.trivy-severity || 'CRITICAL,HIGH' }}
-      trivy-ignore-unfixed: ${{ inputs.trivy-ignore-unfixed || true }}
-      ssl-scan-limit: ${{ inputs.ssl-scan-limit || '20' }}
-      zap-scan-type: ${{ inputs.zap-scan-type || 'full' }}
-      artifact-retention-days: ${{ inputs.artifact-retention-days || '30' }}
-      fail-on-severity: ${{ inputs.fail-on-severity || 'critical' }}
-    secrets:
-      shuffle-webhook-url: ${{ secrets.SHUFFLE_WEBHOOK_URL }}
+**Step 1** — In your project root, run:
 ```
+mkdir -p .github/workflows && curl -o .github/workflows/security-scan.yml \
+  https://raw.githubusercontent.com/WaheedX-code/shieldflow/main/.github/workflows/trigger.yml
+```
+**Step 2** — Add your secret in Github —> Settings —> Secrets and variables —> Actions:
 
-**Step 3** — Push to GitHub. The pipeline runs automatically.
+|Secret  | Required  | Description |
+|------|-------|------|
+|`SHUFFLE_WEBHOOK_URL`| No | Webhook URL to send scan results to Shuffle SOAR |
 
------
-
-## Inputs & Secrets
-
-### Inputs
-
-|Input         |Required|Default|Description                                    |
-|--------------|--------|-------|-----------------------------------------------|
-|`target-url`  |No      |`''`   |URL of the running application to scan with ZAP|
-|`target-image`|No      |`''`   |Docker image to spin up and scan               |
-|`target-port` |No      |`''`   |Port the application runs on                   |
-
-### Secrets
-
-|Secret               |Required|Description                                         |
-|---------------------|--------|----------------------------------------------------|
-|`SHUFFLE_WEBHOOK_URL`|No      |Your Shuffle SOAR webhook URL for findings ingestion|
-
-**Adding secrets to your repository:**
-
-Go to: **Your repo → Settings → Secrets and variables → Actions → New repository secret**
+**Step 3** — Push to Github, the pipeline runs automatically or go to Actions tab —> **Trigger ShieldFlow Pipeline** —> **Run workflow**
 
 -----
 
