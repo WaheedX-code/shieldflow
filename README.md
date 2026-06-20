@@ -101,8 +101,8 @@ on:
         description: 'Docker image to spin up for scanning (optional)'
         required: false
         type: string
-      target-port:
-        description: 'Port the application runs on (optional)'
+      target-domain:
+        description: 'Domain for Recon + SSL + Nuclei'
         required: false
         type: string
 
@@ -117,7 +117,7 @@ jobs:
     with:
       target-url: ${{ inputs.target-url || '' }}
       target-image: ${{ inputs.target-image || '' }}
-      target-port: ${{ inputs.target-port || '3000' }}
+      target-domain: ${{ inputs.target-domain || '' }}
     secrets:
       shuffle-webhook-url: ${{ secrets.SHUFFLE_WEBHOOK_URL }}
 ```
