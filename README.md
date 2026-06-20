@@ -15,10 +15,8 @@ ShieldFlow is a reusable GitHub Actions security pipeline that automatically sca
 - [Security Tools](#security-tools)
 - [How It Works](#how-it-works)
 - [Quick Start](#quick-start)
-- [Inputs & Secrets](#inputs--secrets)
 - [Scanning Scenarios](#scanning-scenarios)
 - [Viewing Results](#viewing-results)
-- [Docker Image Scanning](#docker-image-scanning)
 - [Test Targets](#test-targets)
 - [SOAR Integration](#soar-integration)
 - [Requirements](#requirements)
@@ -111,10 +109,20 @@ Triggers automatically when you push code or open a pull request. No additional 
 Trigger manually when your application is deployed and running.
 
 1. Go to **Actions → Security Scan → Run workflow**
-1. Enter your application URL in the `target-url` field
+1. Enter your application URL in the `target-url` field or the docker image in the `target-docker` field
 1. Click **Run workflow**
 
-**Tools that run:** Semgrep  Trivy  Gitleaks  ZAP 
+**Tools that run:** All 7 tools
+
+### External attack surface scan
+```yaml
+with:
+  target-domain: "yourdomain.com"
+```
+Tools: Subfinder + httpx + SSL + Nuclei
+
+### Continuous monitoring (daily cron)
+Runs automatically. Only new findings since the last run trigger a GitHub Issue.
 
 -----
 
@@ -137,7 +145,7 @@ with:
 
 ### GitHub Security Tab
 
-All SAST, SCA, and Secrets findings are uploaded in SARIF format and appear here:
+All SAST, SCA, Secrets and Nuclei findings are uploaded in SARIF format and appear here:
 
 **Your repo → Security → Code scanning alerts**
 
@@ -148,29 +156,15 @@ Each alert includes:
 - Vulnerability description
 - Recommended fix
 
-### ZAP Report
+**Actions Artifacts:**
+- `shieldflow-unified-report` → All findings in one JSON file
+- `zap-dast-results` → ZAP HTML + JSON report
+- `nuclei-results` → Raw Nuclei output
+- `recon-results` → Subdomains + live hosts
+- `ssl-results` → SSL/TLS analysis
+- `attack-surface-monitor-{run}` → Daily scan + delta report
 
-ZAP findings are available as a downloadable artifact:
-
-**Actions → Your workflow run → Artifacts → zap-dast-results**
-
------
-
-##  Docker Image Scanning
-
-ShieldFlow can spin up a Docker container, scan the image for CVEs with Trivy, and then run ZAP against the live container — all automatically.
-
-```yaml
-jobs:
-  security-scan:
-    uses: WaheedX-code/shieldflow/.github/workflows/shieldflow.yml@main
-    with:
-      target-url: 'http://localhost:3000'
-      target-image: 'myapp:latest'
-      target-port: '3000'
-    secrets:
-      shuffle-webhook-url: ${{ secrets.SHUFFLE_WEBHOOK_URL }}
-```
+**GitHub Issues** → Auto-created for new CRITICAL findings in monitoring mode
 
 -----
 
