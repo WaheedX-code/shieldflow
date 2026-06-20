@@ -191,9 +191,23 @@ jobs:
   security-scan:
     uses: WaheedX-code/shieldflow/.github/workflows/trigger.yml@main
     with:
-      target-url: ${{ inputs.target-url || '' }}
-      target-image: ${{ inputs.target-image || '' }}
-      target-domain: ${{ inputs.target-domain || '' }}
+      target-url: ${{ inputs.target-url || vars.TARGET_URL }}
+      target-image: ${{ inputs.target-image || vars.TARGET_IMAGE || '' }}
+      target-port: ${{ inputs.target-port || vars.TARGET_PORT || '' }}
+      target-domain: ${{ inputs.target-domain || vars.TARGET_DOMAIN || '' }}
+      nuclei-severity: ${{ inputs.nuclei-severity || 'critical,high' }}
+      nuclei-tags: ${{ inputs.nuclei-tags || 'cve,misconfig,exposure,takeover,ssl' }}
+      nuclei-exclude-tags: ${{ inputs.nuclei-exclude-tags || 'dos,fuzzing,helpers,headless' }}
+      nuclei-rate-limit: ${{ inputs.nuclei-rate-limit || '50' }}
+      nuclei-concurrency: ${{ inputs.nuclei-concurrency || '10' }}
+      nuclei-timeout: ${{ inputs.nuclei-timeout || '10' }}
+      semgrep-config: ${{ inputs.semgrep-config || 'auto' }}
+      trivy-severity: ${{ inputs.trivy-severity || 'CRITICAL,HIGH' }}
+      trivy-ignore-unfixed: ${{ inputs.trivy-ignore-unfixed || true }}
+      ssl-scan-limit: ${{ inputs.ssl-scan-limit || '20' }}
+      zap-scan-type: ${{ inputs.zap-scan-type || 'full' }}
+      artifact-retention-days: ${{ inputs.artifact-retention-days || '30' }}
+      fail-on-severity: ${{ inputs.fail-on-severity || 'critical' }}
     secrets:
       shuffle-webhook-url: ${{ secrets.SHUFFLE_WEBHOOK_URL }}
 ```
