@@ -79,8 +79,9 @@ All findings → SOAR (if configured)
 
 ## Quick Start
 
-**Step 1** — In your repository, create the file `.github/workflows/scan.yml`
-
+**Step 1** — Copy this file into your repo
+.github/workflows/shieldflow-scan.yml
+[https:
 **Step 2** — Add the following content:
 
 ```yaml
