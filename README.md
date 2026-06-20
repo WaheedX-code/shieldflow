@@ -1,4 +1,4 @@
-# ShieldFlow V2 — AppSec Pipeline
+# ShieldFlow V2.0 — AppSec Pipeline
 
 ![ShieldFlow Pipeline](https://github.com/WaheedX-code/shieldflow/actions/workflows/trigger.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
