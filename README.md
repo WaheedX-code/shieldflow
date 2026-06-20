@@ -94,17 +94,93 @@ on:
   workflow_dispatch:
     inputs:
       target-url:
-        description: 'URL of your running application to scan'
+        description: "URL of running application to scan with ZAP"
         required: false
         type: string
+        default: ""
       target-image:
-        description: 'Docker image to spin up for scanning (optional)'
+        description: "Docker image to spin up and scan"
         required: false
         type: string
+        default: ""
+      target-port:
+        description: "Port the application runs on"
+        required: false
+        type: string
+        default: ""
       target-domain:
-        description: 'Domain for Recon + SSL + Nuclei'
+        description: "Domain for recon + subdomain discovery + SSL check"
         required: false
         type: string
+        default: ""
+      nuclei-severity:
+        description: "Nuclei severity filter (critical,high,medium,low)"
+        required: false
+        type: string
+        default: "critical,high"
+      nuclei-tags:
+        description: "Nuclei template tags to include"
+        required: false
+        type: string
+        default: "cve,misconfig,exposure,takeover,ssl"
+      nuclei-exclude-tags:
+        description: "Nuclei template tags to exclude"
+        required: false
+        type: string
+        default: "dos,fuzzing,helpers,headless"
+      nuclei-rate-limit:
+        description: "Nuclei max requests per second"
+        required: false
+        type: string
+        default: "50"
+      nuclei-concurrency:
+        description: "Nuclei parallel templates execution"
+        required: false
+        type: string
+        default: "10"
+      nuclei-timeout:
+        description: "Nuclei seconds per request"
+        required: false
+        type: string
+        default: 10
+      semgrep-config:
+        description: "Semgrep ruleset (auto, p/owasp-top-ten, p/python, etc.)"
+        required: false
+        type: string
+        default: "auto"
+      trivy-severity:
+        description: "Trivy Severity filter (CRITICAL,HIGH,MEDIUM,LOW)"
+        required: false
+        type: string
+        default: "CRITICAL,HIGH"
+      trivy-ignore-unfixed:
+        description: "Skip CVEs with no fix available"
+        required: false
+        type: boolean
+        default: true
+      ssl-scan-limit:
+        description: "Max number of subdomains to run SSL checks against"
+        required: false
+        type: string
+        default: "20"
+      zap-scan-type:
+        description: "ZAP scan type: full (active attacks) or baseline (passive only)"
+        required: false
+        type: string
+        default: "full"
+      artifact-retention-days:
+        description: "How many days to keep scan artifacts"
+        required: false
+        type: string
+        default: "30"
+      fail-on-severity:
+        description: "Fail the pipeline if findings at this severity are found (critical,high,none)"
+        required: false
+        type: string
+        default: "critical"
+    secrets:
+      shuffle-webhook-url:
+        required: false
 
 permissions:
   security-events: write
@@ -113,7 +189,7 @@ permissions:
 
 jobs:
   security-scan:
-    uses: WaheedX-code/shieldflow/.github/workflows/shieldflow.yml@main
+    uses: WaheedX-code/shieldflow/.github/workflows/trigger.yml@main
     with:
       target-url: ${{ inputs.target-url || '' }}
       target-image: ${{ inputs.target-image || '' }}
